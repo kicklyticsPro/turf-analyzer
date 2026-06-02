@@ -90,11 +90,19 @@ PROFIL_KEYWORDS = {
     "finisseur": ["dans la ligne droite", "fini fort", "a remonté", "dans les derniers mètres", "ligne d'arrivée", "a coiffé"],
     "fragile": ["s'est galopé", "fauté", "disqualifié", "a faibli", "ne s'est pas employé", "distancé", "a chuté"],
     "regulier": ["dans le peloton", "à mi-parcours", "a suivi", "régulier", "honorable"],
+    "repere": ["malheureux", "enfermé", "longtemps bloqué", "n'a pu s'exprimer", "aurait fini", "tracé une superbe", "note", "gros regrets"],
+    "prepare": ["visé", "objectif", "affûté", "sera prêt", "course de rentrée nécessaire", "a progressé", "bel engagement"],
 }
 
 def detect_profile(perfs_detail, comment_text=None):
+    """
+    Analyse les commentaires des courses passées pour détecter le profil du cheval
+    et les signaux qualitatifs (malheureux/préparé).
+    """
     counters = defaultdict(int)
     total = 0
+    
+    # Analyse des 5 dernières courses
     for course in (perfs_detail or [])[:5]:
         for p in course.get("participants", []):
             if p.get("itsHim"):
@@ -105,21 +113,39 @@ def detect_profile(perfs_detail, comment_text=None):
                     for profil, keywords in PROFIL_KEYWORDS.items():
                         for kw in keywords:
                             if kw in cl:
-                                counters[profil] += 1
+                                # Les signaux "repere" et "prepare" sont plus rares, on leur donne du poids
+                                weight = 2 if profil in ("repere", "prepare") else 1
+                                counters[profil] += weight
                                 break
-    if total == 0: return {"attaquant": 50, "finisseur": 50, "fragile": 50, "regulier": 50}
-    return {p: min(100, (counters[p] / total) * 100 * 2.5) for p in PROFIL_KEYWORDS}
+
+    if total == 0: 
+        return {p: 50 for p in PROFIL_KEYWORDS}
+
+    # Normalisation 0-100
+    res = {}
+    for p in PROFIL_KEYWORDS:
+        raw = (counters[p] / (total * (2 if p in ("repere", "prepare") else 1))) * 100 * 2.5
+        res[p] = min(100, max(0, raw if raw > 0 else (50 if p not in ("repere", "prepare") else 0)))
+    
+    return res
 
 def get_profile_match_score(profil, distance, nb_partants):
     if not profil: return 50
     score = 50
+    
+    # Tactique selon distance
     if distance and distance < 2000:
         score += (profil.get("attaquant", 50) - 50) * 0.5
     elif distance and distance > 2700:
         score += (profil.get("finisseur", 50) - 50) * 0.5
     else:
         score += (profil.get("regulier", 50) - 50) * 0.3
-    score -= profil.get("fragile", 0) * 0.15
+        
+    # Signaux qualitatifs v5
+    score += (profil.get("repere", 0) * 0.4)   # Boost si malheureux récemment
+    score += (profil.get("prepare", 0) * 0.4)  # Boost si visé/objectif
+    
+    score -= (profil.get("fragile", 0) * 0.15)
     return max(0, min(100, score))
 
 # ============================================================
