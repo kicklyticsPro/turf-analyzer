@@ -557,6 +557,7 @@ def score_distance(perfs_detail, distance_course):
 # ============================================================
 def featurize(p, nb_partants):
     s = p["scores"]
+    prof = p.get("profile", {})
     return [
         s.get("marche", 0), s.get("forme", 0), s.get("carriere", 0),
         s.get("gains", 0), s.get("driver", 50), s.get("entraineur", 50),
@@ -565,6 +566,7 @@ def featurize(p, nb_partants):
         s.get("confrontation", 50), s.get("pedigree", 50),
         s.get("corde", 50), s.get("equipment", 50), s.get("profile_match", 50),
         s.get("musique", 50), s.get("gains_relatifs", 50), s.get("form_ecurie", 50),
+        prof.get("repere", 0), prof.get("prepare", 0),
         p.get("days_since_last", 60), p.get("nbCourses", 0),
         nb_partants, 1.0 / max(p.get("cote") or 50, 1),
         p["bonus"].get("team", 0), p["bonus"].get("deferre", 0),
@@ -577,6 +579,7 @@ FEATURE_NAMES = ["marche","forme","carriere","gains","driver","entraineur",
                  "distance","cheval_stats","elo","age_sexe","repos",
                  "elo_trend","confrontation","pedigree","corde","equipment",
                  "profile_match","musique_score","gains_relatifs","form_ecurie",
+                 "signal_repere", "signal_prepare",
                  "days_since_last","nb_courses","nb_partants","inv_cote",
                  "bonus_team","bonus_deferre","age_raw","is_female"]
 
@@ -983,22 +986,26 @@ def analyser_course(participants_data, perfs_data=None, distance=None,
 
     scores_intr = []
     for a in analyses:
-        s = (0.15 * a["scores"]["forme"] +
-             0.08 * a["scores"]["carriere"] +
-             0.07 * a["scores"]["gains"] +
-             0.09 * a["scores"]["driver"] +
-             0.06 * a["scores"]["entraineur"] +
-             0.07 * a["scores"]["distance"] +
-             0.09 * a["scores"]["cheval_stats"] +
-             0.11 * a["scores"]["elo"] +
-             0.04 * a["scores"]["age_sexe"] +
-             0.04 * a["scores"]["repos"] +
-             0.05 * a["scores"]["elo_trend"] +
+        # Raffinement v5 : Augmentation du poids des signaux qualitatifs
+        # et intégration des nouveaux scores (musique, écurie)
+        s = (0.12 * a["scores"]["forme"] +
+             0.06 * a["scores"]["carriere"] +
+             0.05 * a["scores"]["gains"] +
+             0.08 * a["scores"]["driver"] +
+             0.05 * a["scores"]["entraineur"] +
+             0.06 * a["scores"]["distance"] +
+             0.08 * a["scores"]["cheval_stats"] +
+             0.10 * a["scores"]["elo"] +
+             0.03 * a["scores"]["age_sexe"] +
+             0.03 * a["scores"]["repos"] +
+             0.04 * a["scores"]["elo_trend"] +
              0.03 * a["scores"]["confrontation"] +
-             0.06 * a["scores"]["pedigree"] +
+             0.05 * a["scores"]["pedigree"] +
              0.03 * a["scores"]["corde"] +
              0.02 * a["scores"]["equipment"] +
-             0.01 * a["scores"]["profile_match"] +
+             0.10 * a["scores"]["profile_match"] + # Augmenté car contient repere/prepare
+             0.10 * a["scores"]["musique"] +       # Nouveau levier
+             0.07 * a["scores"]["form_ecurie"] +   # Nouveau levier
              a["bonus"]["team"] + a["bonus"]["deferre"])
         scores_intr.append(max(s, 1))
 
@@ -1034,7 +1041,19 @@ def analyser_course(participants_data, perfs_data=None, distance=None,
         if a["cote"] and a["probaMarche"] > 0:
             edge = a["chance"] - a["probaMarche"]
             a["edge"] = round(edge, 2)
-            a["valueBet"] = edge > 4 and a["cote"] >= 4
+            
+            # Value Bet standard
+            is_value = edge > 4 and a["cote"] >= 4
+            a["valueBet"] = is_value
+            
+            # DÉTECTION GOLD (Raffinement v5)
+            # Un pari GOLD combine avantage mathématique ET signaux qualitatifs forts
+            prof = a.get("profile", {})
+            has_signals = prof.get("repere", 0) > 25 or prof.get("prepare", 0) > 25
+            is_stable = a["scores"].get("form_ecurie", 50) > 60
+            
+            a["isGold"] = is_value and has_signals and is_stable
+            
             p = a["chance"] / 100
             a["kellyMise"] = kelly_amount(p, a["cote"], capital, kelly_mult=0.25)
             a["kellyFraction"] = round(kelly_fraction(p, a["cote"], 0.25) * 100, 2)
@@ -1042,6 +1061,7 @@ def analyser_course(participants_data, perfs_data=None, distance=None,
         else:
             a["edge"] = 0
             a["valueBet"] = False
+            a["isGold"] = False
             a["kellyMise"] = 0
             a["kellyFraction"] = 0
             a["expectedROI"] = 0
@@ -1682,6 +1702,7 @@ def api_scan_alerts():
                         "cote": a["cote"],
                         "chance": a["chance"],
                         "edge": a["edge"],
+                        "isGold": a.get("isGold", False),
                         "kellyMise": a.get("kellyMise", 0),
                     })
 
