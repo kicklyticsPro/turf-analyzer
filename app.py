@@ -28,9 +28,11 @@ from lib.automl import (log_loss, roc_auc, brier_score, calibration_curve,
                          evaluate_model, cross_validate, random_search,
                          StackingEnsemble, feature_importance_perturbation)
 from lib.kelly import kelly_amount, kelly_fraction, expected_value, expected_roi
-from lib.features_v4 import (build_pedigree_stats, get_pedigree_score,
+from lib.features_v5 import (build_pedigree_stats, get_pedigree_score,
                               get_corde_score, get_equipment_score,
-                              detect_profile, get_profile_match_score)
+                              detect_profile, get_profile_match_score,
+                              get_musique_score, get_relative_gains_score,
+                              get_form_ecurie_score, get_days_since_last_race)
 from lib.multi_paris import proba_place_simple, best_combinations
 from lib.walk_forward import generate_windows, aggregate_fold_metrics, fmt_window
 from lib.calibration import Calibrator
@@ -562,6 +564,8 @@ def featurize(p, nb_partants):
         s.get("age_sexe", 50), s.get("repos", 50), s.get("elo_trend", 50),
         s.get("confrontation", 50), s.get("pedigree", 50),
         s.get("corde", 50), s.get("equipment", 50), s.get("profile_match", 50),
+        s.get("musique", 50), s.get("gains_relatifs", 50), s.get("form_ecurie", 50),
+        p.get("days_since_last", 60), p.get("nbCourses", 0),
         nb_partants, 1.0 / max(p.get("cote") or 50, 1),
         p["bonus"].get("team", 0), p["bonus"].get("deferre", 0),
         p.get("age") or 5,
@@ -572,7 +576,8 @@ def featurize(p, nb_partants):
 FEATURE_NAMES = ["marche","forme","carriere","gains","driver","entraineur",
                  "distance","cheval_stats","elo","age_sexe","repos",
                  "elo_trend","confrontation","pedigree","corde","equipment",
-                 "profile_match","nb_partants","inv_cote",
+                 "profile_match","musique_score","gains_relatifs","form_ecurie",
+                 "days_since_last","nb_courses","nb_partants","inv_cote",
                  "bonus_team","bonus_deferre","age_raw","is_female"]
 
 
@@ -856,6 +861,12 @@ def analyser_course_features(participants_data, perfs_data, distance, discipline
     total_inv = sum(inv_cotes) or 1.0
     proba_marche = [x / total_inv * 100 for x in inv_cotes]
 
+    # Pré-calcul des gains pour scores relatifs
+    all_gains_race = []
+    for p in parts:
+        g = (p.get("gainsParticipant") or {}).get("gainsCarriere", 0) or 0
+        all_gains_race.append(g)
+
     for i, p in enumerate(parts):
         nb_courses = p.get("nombreCourses", 0) or 0
         nb_vict = p.get("nombreVictoires", 0) or 0
@@ -900,6 +911,12 @@ def analyser_course_features(participants_data, perfs_data, distance, discipline
         profile = detect_profile(perfs_detail)
         s_profile_match = get_profile_match_score(profile, distance, nb_partants)
 
+        # NOUVEAUTÉS v5
+        s_musique = get_musique_score(p.get("musique"))
+        s_gains_rel = get_relative_gains_score(gains_carriere, all_gains_race)
+        s_form_ecurie = get_form_ecurie_score(entr, team_stats.get("entraineurs", {}))
+        days_since_last = get_days_since_last_race(p.get("musique"), perfs_detail, today_ts)
+
         bonus_team = 0
         if driver and entr and driver == entr: bonus_team = 3
         if p.get("driverChange"): bonus_team -= 5
@@ -920,6 +937,7 @@ def analyser_course_features(participants_data, perfs_data, distance, discipline
             "urlCasaque": p.get("urlCasaque"),
             "ordreArrivee": p.get("ordreArrivee"),
             "profile": profile,
+            "days_since_last": round(days_since_last, 1),
             "scores": {
                 "marche": round(proba_marche[i], 1),
                 "forme": round(s_forme, 1),
@@ -938,6 +956,9 @@ def analyser_course_features(participants_data, perfs_data, distance, discipline
                 "corde": round(s_corde, 1),
                 "equipment": round(s_equipment, 1),
                 "profile_match": round(s_profile_match, 1),
+                "musique": round(s_musique, 1),
+                "gains_relatifs": round(s_gains_rel, 1),
+                "form_ecurie": round(s_form_ecurie, 1),
             },
             "bonus": {"team": bonus_team, "deferre": bonus_deferre},
         })
