@@ -102,28 +102,41 @@ def parse_pronostic_presse(html):
 def get_geny_data(date_str, r_num, c_num, libelle=""):
     """
     Tente de récupérer les données enrichies depuis Geny.
-    URL pattern : https://www.geny.com/partants-pmu/YYYY-MM-DD-{hippo}-pmu-prixname_cXXXXXX
-    Trop complexe sans connaître l'URL exacte → on tente une heuristique.
     """
-    # Format date Geny : 2026-06-01
     if len(date_str) == 8:
         d, m, y = date_str[:2], date_str[2:4], date_str[4:]
         date_iso = f"{y}-{m}-{d}"
     else:
         return {"terrain": None, "meteo": None, "pronostics_presse": {}}
 
-    # On essaye une URL "racing" Geny (peut ne pas exister)
-    # Note : Geny est souvent protégé contre le scraping, ceci est best-effort
-    candidates = [
-        f"https://www.geny.com/reunions-courses-pmu/_d-{date_iso}",
-    ]
+    # Heuristique pour trouver le lien de la course
+    # On commence par charger la page de la réunion
+    base_url = f"https://www.geny.com/reunions-courses-pmu/_d-{date_iso}"
+    html_reunion = fetch_url(base_url)
+    
+    # Si on trouve un lien vers la course spécifique R{X}C{Y}
+    course_path = None
+    if html_reunion:
+        # Recherche d'un lien type /partants-pmu/2026-06-02-hippo-prix-nom_c123456
+        # qui correspondrait à notre R et C
+        pattern = rf'href="(/partants-pmu/{date_iso}-[^"]+_c\d+)"[^>]*>C{c_num}'
+        m = re.search(pattern, html_reunion)
+        if m:
+            course_path = m.group(1)
 
-    for url in candidates:
-        html = fetch_url(url)
-        if html:
-            terrain_data = parse_terrain_meteo(html)
-            pronostics = parse_pronostic_presse(html)
+    if course_path:
+        url_course = f"https://www.geny.com{course_path}"
+        html_course = fetch_url(url_course)
+        if html_course:
+            terrain_data = parse_terrain_meteo(html_course)
+            pronostics = parse_pronostic_presse(html_course)
             return {**terrain_data, "pronostics_presse": pronostics}
+
+    # Fallback sur la page réunion si pas de lien spécifique trouvé
+    if html_reunion:
+        terrain_data = parse_terrain_meteo(html_reunion)
+        pronostics = parse_pronostic_presse(html_reunion)
+        return {**terrain_data, "pronostics_presse": pronostics}
 
     return {"terrain": None, "meteo": None, "pronostics_presse": {}}
 
