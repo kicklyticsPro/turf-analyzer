@@ -23,8 +23,29 @@
     -webkit-background-clip: text; background-clip: text;
     -webkit-text-fill-color: transparent;
   }
-  .version-tag { background: #8b5cf6; color: white; padding: 2px 6px;
+  .version-tag { background: #f59e0b; color: #0f172a; padding: 2px 6px;
     border-radius: 4px; font-size: 10px; font-weight: 700; margin-left: 6px; }
+
+  /* GOLD STYLING */
+  .horse.gold {
+    border: 2px solid #f59e0b;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(30, 41, 59, 0.8) 100%);
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.4);
+    animation: goldPulse 2s infinite alternate;
+  }
+  @keyframes goldPulse {
+    from { box-shadow: 0 0 10px rgba(245, 158, 11, 0.3); }
+    to { box-shadow: 0 0 25px rgba(245, 158, 11, 0.6); }
+  }
+  .gold-badge {
+    position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+    background: linear-gradient(90deg, #f59e0b, #fbbf24);
+    color: #0f172a; padding: 3px 12px; border-radius: 12px;
+    font-size: 11px; font-weight: 900; letter-spacing: 1px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3); z-index: 10;
+    border: 1px solid white;
+  }
+
   .nav-links { display: flex; gap: 8px; }
   .nav-links a {
     color: #94a3b8; text-decoration: none; font-size: 13px;
@@ -299,7 +320,7 @@
 </head>
 <body>
 <header>
-  <h1>🐎 Turf Analyzer<span class="version-tag">v4</span></h1>
+  <h1>🐎 Turf Analyzer<span class="version-tag">v7.1 Pro</span></h1>
   <div class="nav-links">
     <a href="/" class="active">Analyse</a>
     <a href="/backtest">Backtest & ML</a>
@@ -333,11 +354,10 @@
   <main class="main" id="mainContent">
     <div class="placeholder">
       <div class="emoji">🏇</div>
-      <h2>Turf Analyzer v5</h2>
-      <p>23 features + <strong>XGBoost</strong> + Multi-paris + Kelly + Alertes + SQLite</p>
-      <p style="font-size:13px; margin-top:10px;">Sélectionnez une course pour analyser.</p>
-      <p style="font-size:11px; margin-top:8px; color:#10b981;">📊 Backtest 280 courses — top1: <strong>67.5%</strong> | top3: <strong>94%</strong> | Kelly ROI: <strong>+487%</strong></p>
-      <p style="font-size:10px; margin-top:6px; color:#94a3b8;">⚠️ Résultats mesurés en backtest — performance réelle moindre</p>
+      <h2>Turf Analyzer v7.1</h2>
+      <p>30 features + <strong>Intelligence Artificielle</strong> + Signaux Sémantiques + Détection GOLD</p>
+      <p style="font-size:13px; margin-top:10px;">Le moteur analyse maintenant les notes de course pour détecter les "malheureux" et les chevaux préparés.</p>
+      <p style="font-size:11px; margin-top:8px; color:#10b981;">🔬 Validation Walk-Forward active | W=0.55 | Hold-out 25%</p>
     </div>
     <div id="alertsBlock"></div>
   </main>
@@ -495,8 +515,12 @@ function renderCourse(data) {
     if (a.scores.repos >= 80) badges.push('<span class="badge good">😌 Repos</span>');
     if (a.scores.pedigree >= 70) badges.push(`<span class="badge" style="background:#a855f7;color:white;">🧬 Lignée</span>`);
     if (a.scores.corde >= 65) badges.push('<span class="badge good">📍 Bonne corde</span>');
+    
+    // NEW v7.1 Signaux sémantiques
+    if (a.profile.repere > 30) badges.push('<span class="badge" style="background:#ef4444;color:white;">🔥 Malheureux</span>');
+    if (a.profile.prepare > 30) badges.push('<span class="badge" style="background:#f59e0b;color:#0f172a;">🎯 Préparé</span>');
 
-    const classes = ['horse', topClass, isWinner?'winner':'', isValueBet?'value-bet':''].filter(x=>x).join(' ');
+    const classes = ['horse', topClass, isWinner?'winner':'', isValueBet?'value-bet':'', a.isGold?'gold':''].filter(x=>x).join(' ');
 
     let kellyBlock = '';
     if (a.kellyMise > 0) {
@@ -513,6 +537,7 @@ function renderCourse(data) {
 
     html += `
       <div class="${classes}">
+        ${a.isGold ? '<div class="gold-badge">⭐ DÉTECTION GOLD</div>' : ''}
         <div class="rank-block">
           <div class="rank-num">#${a.rang}</div>
           <div class="rank-pmu">${a.numPmu}</div>
@@ -552,6 +577,11 @@ function renderCourse(data) {
           <div class="score-item v4"><div class="lbl">Corde</div><div class="val">${a.scores.corde}</div></div>
           <div class="score-item v4"><div class="lbl">Équip</div><div class="val">${a.scores.equipment}</div></div>
           <div class="score-item v4"><div class="lbl">Profil</div><div class="val">${a.scores.profile_match}</div></div>
+          <div class="score-item" style="background:#1e293b;"><div class="lbl">Musique</div><div class="val">${a.scores.musique}</div></div>
+          <div class="score-item" style="background:#1e293b;"><div class="lbl">Richesse</div><div class="val">${a.scores.gains_relatifs}</div></div>
+          <div class="score-item team" style="background:#1e293b;"><div class="lbl">Écurie</div><div class="val">${a.scores.form_ecurie}</div></div>
+          <div class="score-item" style="background:#7f1d1d;"><div class="lbl">Malh.</div><div class="val">${Math.round(a.profile.repere)}</div></div>
+          <div class="score-item" style="background:#064e3b;"><div class="lbl">Prép.</div><div class="val">${Math.round(a.profile.prepare)}</div></div>
         </div>
       </div>
     `;
@@ -659,9 +689,9 @@ function renderAlerts(alerts, config) {
   block.innerHTML = `
     <div class="alerts-banner">
       🔔 <strong>${alerts.length} value bets détectés</strong> (edge ≥ ${config.min_edge}%) :
-      ${alerts.slice(0, 8).map(a => `
-        <span class="alert-pill" onclick="goToCourse('${a.course}')">
-          ${a.course} · <strong>${a.cheval}</strong> · cote ${a.cote} · +${a.edge}% · ${a.heure}
+      ${alerts.slice(0, 10).map(a => `
+        <span class="alert-pill" onclick="goToCourse('${a.course}')" style="${a.isGold ? 'border: 2px solid #f59e0b; background: rgba(245,158,11,0.2);' : ''}">
+          ${a.isGold ? '⭐ GOLD · ' : ''}${a.course} · <strong>${a.cheval}</strong> · cote ${a.cote} · +${a.edge}% · ${a.heure}
         </span>
       `).join('')}
     </div>
@@ -772,5 +802,5 @@ async function confirmBet() {
 document.getElementById('datePicker').value = todayStr();
 loadReunions();
 </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a058fab8ca88d107',t:'MTc4MDQyOTc0Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
