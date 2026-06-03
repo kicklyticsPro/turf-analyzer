@@ -299,6 +299,27 @@ def update_alerts_config(min_edge, min_cote, max_cote, enabled):
 
 
 # ============================================================
+#  Odd Snapshots (Smart Money)
+# ============================================================
+def save_morning_odd(date_course, course_id, num_pmu, odd):
+    init_db()
+    with get_db() as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO odd_snapshots (date_course, course_id, num_pmu, morning_odd, captured_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (date_course, course_id, num_pmu, float(odd), datetime.now().isoformat()))
+
+def get_morning_odd(date_course, course_id, num_pmu):
+    init_db()
+    with get_db() as conn:
+        row = conn.execute("""
+            SELECT morning_odd FROM odd_snapshots 
+            WHERE date_course = ? AND course_id = ? AND num_pmu = ?
+        """, (date_course, course_id, num_pmu)).fetchone()
+        return row["morning_odd"] if row else None
+
+
+# ============================================================
 #  Migration depuis le JSON v4 (si présent)
 # ============================================================
 def migrate_from_json(json_path):
