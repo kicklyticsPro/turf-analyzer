@@ -1054,6 +1054,12 @@ def analyser_course(participants_data, perfs_data=None, distance=None,
             
             a["isGold"] = is_value and has_signals and is_stable
             
+            # DÉTECTION "COUP SÛR" (v7.1 Pro)
+            # Critères ultra-stricts pour le Top 3
+            proba_top3 = a.get("chancePlace3", 0)
+            is_reliable = a["scores"].get("forme", 0) > 80 and a["profile"].get("fragile", 0) < 15
+            a["isCoupSur"] = proba_top3 >= 75 and a["rang"] == 1 and is_reliable
+
             p = a["chance"] / 100
             a["kellyMise"] = kelly_amount(p, a["cote"], capital, kelly_mult=0.25)
             a["kellyFraction"] = round(kelly_fraction(p, a["cote"], 0.25) * 100, 2)
@@ -1081,6 +1087,11 @@ def analyser_course(participants_data, perfs_data=None, distance=None,
     for i, a in enumerate(analyses):
         a["chancePlace3"] = round(places_3[i], 2)
         a["chancePlace2"] = round(places_2[i], 2)
+        
+        # DÉTECTION "COUP SÛR" v7.1
+        # Critères : Probabilité Top 3 > 75% + Favori Analyse + Forme > 80 + Fiabilité profile
+        is_reliable = a["scores"].get("forme", 0) > 80 and a["profile"].get("fragile", 0) < 15
+        a["isCoupSur"] = a["chancePlace3"] >= 75 and a["rang"] == 1 and is_reliable
 
     return analyses
 
