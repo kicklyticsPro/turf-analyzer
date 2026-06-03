@@ -37,6 +37,7 @@ def init_db():
                 cheval TEXT NOT NULL,
                 num_pmu INTEGER,
                 type_pari TEXT DEFAULT 'simple_gagnant',
+                type_detection TEXT DEFAULT 'value', -- NEW: value, gold, coup_sur
                 cote REAL NOT NULL,
                 mise REAL NOT NULL,
                 edge REAL DEFAULT 0,
@@ -68,6 +69,16 @@ def init_db():
             );
 
             INSERT OR IGNORE INTO alerts_config (id) VALUES (1);
+
+            CREATE TABLE IF NOT EXISTS odd_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date_course TEXT NOT NULL,
+                course_id TEXT NOT NULL, -- R1C1
+                num_pmu INTEGER NOT NULL,
+                morning_odd REAL,
+                captured_at TEXT,
+                UNIQUE(date_course, course_id, num_pmu)
+            );
         """)
 
 
@@ -79,8 +90,8 @@ def add_bet(bet):
     with get_db() as conn:
         cur = conn.execute("""
             INSERT INTO bets (created_at, date_course, course, hippodrome, discipline,
-                              cheval, num_pmu, type_pari, cote, mise, edge, chance_calculee, statut)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'EN_ATTENTE')
+                              cheval, num_pmu, type_pari, type_detection, cote, mise, edge, chance_calculee, statut)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'EN_ATTENTE')
         """, (datetime.now().isoformat(),
               bet.get("date_course", datetime.now().strftime("%d/%m/%Y")),
               bet.get("course", ""),
@@ -89,6 +100,7 @@ def add_bet(bet):
               bet["cheval"],
               bet.get("num_pmu"),
               bet.get("type_pari", "simple_gagnant"),
+              bet.get("type_detection", "value"),
               float(bet["cote"]),
               float(bet["mise"]),
               float(bet.get("edge", 0)),
