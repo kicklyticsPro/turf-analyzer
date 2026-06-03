@@ -38,6 +38,7 @@ from lib.walk_forward import generate_windows, aggregate_fold_metrics, fmt_windo
 from lib.calibration import Calibrator
 from lib import db
 from lib import geny_scraper
+from lib import telegram_bot
 
 app = Flask(__name__)
 
@@ -567,6 +568,7 @@ def featurize(p, nb_partants):
         s.get("corde", 50), s.get("equipment", 50), s.get("profile_match", 50),
         s.get("musique", 50), s.get("gains_relatifs", 50), s.get("form_ecurie", 50),
         prof.get("repere", 0), prof.get("prepare", 0),
+        p.get("drop_pct", 0), # NEW Feature #23: Smart Money
         p.get("days_since_last", 60), p.get("nbCourses", 0),
         nb_partants, 1.0 / max(p.get("cote") or 50, 1),
         p["bonus"].get("team", 0), p["bonus"].get("deferre", 0),
@@ -580,6 +582,7 @@ FEATURE_NAMES = ["marche","forme","carriere","gains","driver","entraineur",
                  "elo_trend","confrontation","pedigree","corde","equipment",
                  "profile_match","musique_score","gains_relatifs","form_ecurie",
                  "signal_repere", "signal_prepare",
+                 "odd_drop_pct",
                  "days_since_last","nb_courses","nb_partants","inv_cote",
                  "bonus_team","bonus_deferre","age_raw","is_female"]
 
@@ -920,6 +923,14 @@ def analyser_course_features(participants_data, perfs_data, distance, discipline
         s_form_ecurie = get_form_ecurie_score(entr, team_stats.get("entraineurs", {}))
         days_since_last = get_days_since_last_race(p.get("musique"), perfs_detail, today_ts)
 
+        # CHUTE DE COTE (v7.1 Smart Money)
+        course_id = hippodrome # Fallback
+        morning_odd = db.get_morning_odd(fmt_date(datetime.now()), course_id, p.get("numPmu"))
+        current_odd = cotes[i]
+        drop_pct = 0
+        if morning_odd and current_odd:
+            drop_pct = round(((morning_odd - current_odd) / morning_odd) * 100, 1)
+
         bonus_team = 0
         if driver and entr and driver == entr: bonus_team = 3
         if p.get("driverChange"): bonus_team -= 5
@@ -941,6 +952,7 @@ def analyser_course_features(participants_data, perfs_data, distance, discipline
             "ordreArrivee": p.get("ordreArrivee"),
             "profile": profile,
             "days_since_last": round(days_since_last, 1),
+            "drop_pct": drop_pct,
             "scores": {
                 "marche": round(proba_marche[i], 1),
                 "forme": round(s_forme, 1),
@@ -1704,18 +1716,28 @@ def api_scan_alerts():
                 if (a.get("edge", 0) >= config["min_edge"]
                     and a.get("cote", 0) >= config["min_cote"]
                     and a.get("cote", 999) <= config["max_cote"]):
-                    alerts.append({
+                    
+                    alert_item = {
                         "course": f"R{r['numOfficiel']}C{c['numOrdre']}",
+                        "course_id": f"R{r['numOfficiel']}C{c['numOrdre']}",
                         "hippodrome": hippo,
                         "heure": datetime.fromtimestamp(c["heureDepart"] / 1000).strftime("%H:%M") if c.get("heureDepart") else "",
                         "cheval": a["nom"],
+                        "nom": a["nom"],
                         "numPmu": a["numPmu"],
                         "cote": a["cote"],
                         "chance": a["chance"],
                         "edge": a["edge"],
                         "isGold": a.get("isGold", False),
+                        "isCoupSur": a.get("isCoupSur", False),
+                        "drop_pct": a.get("drop_pct", 0),
                         "kellyMise": a.get("kellyMise", 0),
-                    })
+                    }
+                    alerts.append(alert_item)
+                    
+                    # ENVOI TELEGRAM pour les priorités (GOLD et COUP SUR)
+                    if alert_item["isGold"] or alert_item["isCoupSur"]:
+                        telegram_bot.notify_bet(alert_item)
 
     # Tri par edge décroissant
     alerts.sort(key=lambda x: -x["edge"])
