@@ -810,12 +810,18 @@ function closeBetModal() {
 
 async function confirmBet() {
   if (!currentBetHorse) return;
+  
+  let typeDet = 'value';
+  if (currentBetHorse.isCoupSur) typeDet = 'coup_sur';
+  else if (currentBetHorse.isGold) typeDet = 'gold';
+
   const data = {
     cheval: document.getElementById('bet_cheval').value,
     cote: parseFloat(document.getElementById('bet_cote').value),
     mise: parseFloat(document.getElementById('bet_mise').value),
     course: document.getElementById('bet_course').value,
     edge: currentBetHorse.edge,
+    type_detection: typeDet
   };
   try {
     const res = await fetch('/api/bets', {
@@ -825,7 +831,7 @@ async function confirmBet() {
     });
     if (res.ok) {
       closeBetModal();
-      alert('Pari enregistré ! Voir "Mes paris" pour le suivre.');
+      alert('Pari enregistré ! Catégorie: ' + typeDet.toUpperCase());
     }
   } catch(e) {
     alert('Erreur: ' + e.message);
@@ -835,5 +841,5 @@ async function confirmBet() {
 document.getElementById('datePicker').value = todayStr();
 loadReunions();
 </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a05ef1484aa1137e',t:'MTc4MDQ5MjI3Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
