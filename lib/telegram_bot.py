@@ -5,8 +5,8 @@ import requests
 import os
 
 # À configurer dans vos variables d'environnement ou directement ici
-TOKEN = os.environ.get("TELEGRAM_TOKEN", "VOTRE_TOKEN_ICI")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "VOTRE_CHAT_ID_ICI")
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "8827955160:AAGpDJA5HRvD3XZvGuvUUY1AYSfPHD-jjNY")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "7897806999")
 
 def send_message(text):
     if not TOKEN or "VOTRE" in TOKEN:
