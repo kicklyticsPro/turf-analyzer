@@ -24,13 +24,14 @@ def daily_update():
         print(f"❌ Erreur lors du calcul des stats : {e}")
         return
 
-    # 2. Ré-entraînement du modèle IA (XGBoost par défaut)
-    print("\nÉtape 2 : Ré-entraînement du modèle Machine Learning (30 derniers jours)...")
+    # 2. Ré-entraînement du modèle IA Élite (Stacking Ensemble)
+    print("\nÉtape 2 : Ré-entraînement du modèle IA Élite (Stacking Ensemble - 30 derniers jours)...")
     try:
-        # On entraîne sur les 30 derniers jours pour capturer les tendances récentes
-        info = app.train_ml_model(days_back=30, model_type="xgb", xgb_n_trees=100)
+        # Le Stacking combine XGBoost + Random Forest + MLP pour une précision maximale
+        info = app.train_ml_model(days_back=30, model_type="stacking")
         if info:
-            print(f"✅ Modèle ré-entraîné : LogLoss={info['log_loss']:.4f}, AUC={info['auc']:.4f}")
+            print(f"✅ Modèle Élite mis à jour : LogLoss={info['log_loss']:.4f}, AUC={info['auc']:.4f}")
+            print(f"   Note : Ce modèle utilise désormais 35 variables d'interaction contextuelles.")
         else:
             print("⚠️ L'entraînement a échoué (pas assez de données ?).")
     except Exception as e:
