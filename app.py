@@ -26,8 +26,8 @@ from lib.calibration import Calibrator
 from lib import db, telegram_bot
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "turf-secret-7.2-elite")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+app.secret_key = "turf-secret-7.2-elite"
+ADMIN_PASSWORD = "admin123"
 
 # CONFIGURATION
 HISTORY_DAYS = 30 
@@ -51,7 +51,7 @@ ML_MODEL_FILE = os.path.join(CACHE_DIR, "ml_model_v5.pkl")
 CALIBRATION_FILE = os.path.join(CACHE_DIR, "calibration_v5.pkl")
 
 # ============================================================
-#  FONCTIONS DE BASE & UTILITAIRES
+#  FONCTIONS DE BASE
 # ============================================================
 def fmt_date(d): return d.strftime("%d%m%Y")
 
@@ -66,13 +66,13 @@ def admin_required(f):
 def score_forme_enrichi(perfs):
     if not perfs: return 50
     pts = 0
-    valid_perfs = perfs[:5]
-    for p in valid_perfs:
+    v = perfs[:5]
+    for p in v:
         pl = (p.get("place") or {}).get("place", 0)
         if pl == 1: pts += 100
         elif 1 <= pl <= 3: pts += 75
         else: pts += 30
-    return pts / len(valid_perfs)
+    return pts / max(1, len(v))
 
 def get_elo_score(ch, elo, all_h):
     my = elo.get(ch, 1500)
@@ -96,17 +96,15 @@ def save_pickle(path, payload):
     except: pass
 
 def safe_compute_stats(max_days=HISTORY_DAYS):
-    """Garantit le retour d'un tuple de 6 éléments, même vide."""
     try:
         res = compute_all_stats(max_days)
         if res and isinstance(res, tuple) and len(res) == 6:
             return res
-    except Exception as e:
-        print(f"Erreur calcul stats: {e}")
+    except: pass
     return ({}, {}, {}, {}, {}, {})
 
 # ============================================================
-#  PMU API WRAPPERS
+#  API PMU
 # ============================================================
 def get_programme(date_str):
     try:
@@ -127,18 +125,18 @@ def get_performances(date_str, r_num, c_num):
     except: return {"participants": []}
 
 # ============================================================
-#  COEUR DU MOTEUR ML (35 Variables)
+#  MACHINE LEARNING (35 Variables)
 # ============================================================
 def featurize(p, nb_partants, avgs=None):
     s = p["scores"]
-    # Base features (23)
+    # Base (23)
     v = [s.get(k, 50) for k in ["marche","forme","carriere","gains","driver","entraineur","distance","cheval_stats","elo","age_sexe","repos","elo_trend","confrontation","pedigree","corde","equipment","profile_match","musique","gains_relatifs","form_ecurie"]]
     v += [p.get("drop_pct", 0), 30, p.get("nbCourses", 0)]
     # Interactions (3)
     v += [(s.get("elo", 50) * s.get("forme", 50)) / 100.0, (s.get("driver", 50) * s.get("entraineur", 50)) / 100.0, 25]
     # Relatifs (2)
     v += [s.get("gains", 0) - (avgs.get("gains", 0) if avgs else 0), s.get("elo", 0) - (avgs.get("elo", 0) if avgs else 0)]
-    # Final metadata (7)
+    # Metadata (7)
     v += [nb_partants, 1.0 / max(p.get("cote") or 50, 1), 0, 0, p.get("age") or 5, 0, 0]
     return v
 
@@ -186,9 +184,11 @@ def compute_all_stats(max_days=HISTORY_DAYS, ref_date=None, use_cache=True):
         if len(finishers) >= 2:
             for i, winner in enumerate(finishers):
                 for loser in finishers[i+1:]:
-                    rw, rl = elo[winner.get("nom")], elo[loser.get("nom")]
-                    ew = 1 / (1 + 10 ** ((rl - rw) / 400))
-                    elo[winner.get("nom")] += 16*(1-ew); elo[loser.get("nom")] -= 16*(1-ew)
+                    wn, ln = winner.get("nom"), loser.get("nom")
+                    if wn and ln:
+                        rw, rl = elo[wn], elo[ln]
+                        ew = 1 / (1 + 10 ** ((rl - rw) / 400))
+                        elo[wn] += 16*(1-ew); elo[ln] -= 16*(1-ew)
 
     p_s, m_s = build_pedigree_stats(pedigree_data)
     res = (dict(team_stats), dict(horse_stats), dict(elo), {k: list(v) for k, v in elo_hist.items()}, dict(horse_races), {"peres": p_s, "meres": m_s})
@@ -223,7 +223,7 @@ def train_ml_model(days_back=21):
     return {"n_samples": len(X), "model_type": "xgb", "trained_at": datetime.now().isoformat()}
 
 # ============================================================
-#  LOGIQUE ANALYSE COURSE
+#  LOGIQUE ANALYSE
 # ============================================================
 def analyser_course_features(parts_data, perfs_data, team_stats, horse_stats, elo):
     parts = [p for p in parts_data.get("participants", []) if p.get("statut") == "PARTANT"]
@@ -281,9 +281,7 @@ def home(): return render_template("index.html")
 @app.route("/login", methods=["GET", "POST"])
 def login_page():
     if request.method == "POST":
-        if request.form.get("password") == ADMIN_PASSWORD:
-            session["logged_in"] = True
-            return redirect(request.args.get("next") or url_for("home"))
+        if request.form.get("password") == ADMIN_PASSWORD: session["logged_in"] = True; return redirect(url_for("home"))
         return render_template("login.html", error="Mot de passe incorrect")
     return render_template("login.html")
 
@@ -306,8 +304,9 @@ def api_course(r_num, c_num):
     use_ml, cap = request.args.get("ml")=="1", float(request.args.get("capital", 100))
     try:
         parts, perfs = get_participants(d_str, r_num, c_num), get_performances(d_str, r_num, c_num)
-        ans = analyser_course(parts, perfs, safe_compute_stats())
-        return jsonify({"date": d_str, "course": {"libelle": "Course R"+str(r_num)+"C"+str(c_num), "heure": "00:00"}, "analyses": ans, "ml_active": False})
+        b = safe_compute_stats()
+        ans = analyser_course(parts, perfs, b, use_ml, cap)
+        return jsonify({"date": d_str, "course": {"libelle": "Course", "heure": "00:00"}, "analyses": ans, "ml_active": False})
     except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route("/backtest")
