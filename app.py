@@ -749,10 +749,10 @@ def _collect_training_data(days_back, exclude_recent, ref_date=None,
             avg_scores[k] = sum(vals) / len(vals) if vals else 0
 
         for a in analyses:
-        X.append(featurize(a, nb, avg_scores))
-        real = next((p for p in parts["participants"]
-                    if p.get("numPmu") == a["numPmu"]), None)
-        y.append(1 if real and real.get("ordreArrivee") == 1 else 0)
+            X.append(featurize(a, nb, avg_scores))
+            real = next((p for p in parts["participants"]
+                        if p.get("numPmu") == a["numPmu"]), None)
+            y.append(1 if real and real.get("ordreArrivee") == 1 else 0)
 
 def races_to_xy_advanced(races):
     X, y = [], []
