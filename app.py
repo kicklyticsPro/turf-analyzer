@@ -188,6 +188,16 @@ def _fetch_course_full(args):
         return None
 
 
+def safe_compute_stats(max_days=HISTORY_DAYS, ref_date=None, use_cache=True):
+    """Garantit le retour d'un tuple de 6 éléments, même vide."""
+    try:
+        res = compute_all_stats(max_days, ref_date, use_cache)
+        if res and isinstance(res, tuple) and len(res) == 6:
+            return res
+    except Exception as e:
+        print(f"Erreur calcul stats: {e}")
+    return ({}, {}, {}, {}, {}, {})
+
 def compute_all_stats(max_days=HISTORY_DAYS, ref_date=None, use_cache=True):
     """Calcule toutes les stats (Elo, forme, drivers, pedigree...) sur les
     `max_days` jours PRÉCÉDANT `ref_date`.
@@ -708,10 +718,9 @@ def _collect_training_data(days_back, exclude_recent, ref_date=None,
     if stats_bundle is not None:
         team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = stats_bundle
     else:
-        bundle = compute_all_stats(
+        bundle = safe_compute_stats(
             max_days=max(HISTORY_DAYS, days_back + exclude_recent),
             ref_date=ref_date)
-        if not bundle: return [], []
         team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
 
     tasks = []
@@ -1185,10 +1194,8 @@ def analyser_course(participants_data, perfs_data=None, distance=None,
 #  Backtest v5
 # ============================================================
 def backtest(days_back=7, use_ml=False):
-    bundle = compute_all_stats(max_days=HISTORY_DAYS)
-    if not bundle or not isinstance(bundle, tuple):
-        return jsonify({"error": "Stats non prêtes"}), 503
-    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
+    stats_bundle = safe_compute_stats()
+    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = stats_bundle
     today = datetime.now()
     results = {
         "total_courses": 0, "top1_winner": 0, "top1_top3": 0, "top3_winner": 0,
@@ -1354,7 +1361,7 @@ def walk_forward_backtest(n_folds=4, train_window=30, test_window=7, gap=1,
         # --- Stats "telles qu'on les connaissait" juste après train_end ---
         # ref_date = lendemain de train_end => n'inclut que train_end et avant.
         stats_ref = train_end + timedelta(days=1)
-        stats_bundle = compute_all_stats(max_days=stats_window, ref_date=stats_ref)
+        stats_bundle = safe_compute_stats(max_days=stats_window, ref_date=stats_ref)
 
         fold = {"fold": f["fold"], **fmt_window(f),
                 "n_test_courses": 0, "n_test_samples": 0,
@@ -1557,10 +1564,14 @@ def api_course(r_num, c_num):
                         "ordreArrivee": c.get("ordreArrivee"),
                     }
 
-    bundle = compute_all_stats(max_days=HISTORY_DAYS)
-    if not bundle:
-        return jsonify({"error": "Initialisation des statistiques..."}), 503
+    # Récupération sécurisée des statistiques
+    bundle = safe_compute_stats(max_days=HISTORY_DAYS)
     team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
+    
+    # Si le bundle est vide (premier lancement), on informe l'utilisateur
+    if not team_stats and not horse_stats:
+        return jsonify({"error": "Calcul des statistiques en cours (environ 1 min)..."}), 503
+
     analyses = analyser_course(parts, perfs,
                                 course_info.get("distance") if course_info else None,
                                 discipline, hippodrome, type_corde,
@@ -1644,10 +1655,12 @@ def api_train():
 
 @app.route("/api/team-stats")
 def api_team_stats():
-    bundle = compute_all_stats(max_days=HISTORY_DAYS)
-    if not bundle:
-        return jsonify({"error": "Stats non prêtes"}), 503
+    bundle = safe_compute_stats(max_days=HISTORY_DAYS)
     team_stats, _, _, _, _, _ = bundle
+    
+    if not team_stats:
+        return jsonify({"error": "Stats non prêtes"}), 503
+        
     drivers = sorted(team_stats["drivers"].items(),
                     key=lambda x: -(x[1]["v"] if x[1]["c"] >= 10 else 0))[:30]
     entr = sorted(team_stats["entraineurs"].items(),
@@ -1782,11 +1795,11 @@ def api_scan_alerts():
         return jsonify({"error": str(e)}), 500
 
     # Récupération des statistiques
-    bundle = compute_all_stats(max_days=HISTORY_DAYS)
-    if not bundle:
-        return jsonify({"error": "Calcul des statistiques en cours..."}), 503
-        
+    bundle = safe_compute_stats(max_days=HISTORY_DAYS)
     team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
+    
+    if not team_stats:
+        return jsonify({"error": "Calcul des statistiques en cours..."}), 503
 
     alerts = []
     for r in prog["programme"]["reunions"]:
@@ -1989,7 +2002,7 @@ def api_explain(r_num, c_num, num_pmu):
                         type_corde = c.get("corde", "")
                         distance = c.get("distance")
 
-        bundle = compute_all_stats()
+        bundle = safe_compute_stats()
         if not bundle or not isinstance(bundle, tuple):
             return jsonify({"error": "Initialisation des statistiques..."}), 503
         team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
