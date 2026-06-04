@@ -358,8 +358,7 @@ def compute_all_stats(max_days=HISTORY_DAYS, ref_date=None, use_cache=True):
     elo_hist_out = {k: list(v) for k, v in elo_hist.items()}
     horse_races_out = {k: v for k, v in horse_races.items()}
 
-    # On ne persiste le cache que pour le run "aujourd'hui" : un fold de
-    # walk-forward (ref_date passée) ne doit JAMAIS écraser le cache prod.
+    # On ne persiste le cache que pour le run "aujourd'hui"
     if is_today:
         save_pickle(STATS_CACHE_FILE, team_out)
         save_pickle(HORSE_STATS_FILE, horse_out)
@@ -1187,7 +1186,8 @@ def analyser_course(participants_data, perfs_data=None, distance=None,
 # ============================================================
 def backtest(days_back=7, use_ml=False):
     bundle = compute_all_stats(max_days=HISTORY_DAYS)
-    if not bundle: return {"error": "Stats non prêtes"}
+    if not bundle or not isinstance(bundle, tuple):
+        return jsonify({"error": "Stats non prêtes"}), 503
     team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
     today = datetime.now()
     results = {
@@ -1990,8 +1990,8 @@ def api_explain(r_num, c_num, num_pmu):
                         distance = c.get("distance")
 
         bundle = compute_all_stats()
-        if not bundle:
-            return jsonify({"error": "Stats non prêtes"}), 503
+        if not bundle or not isinstance(bundle, tuple):
+            return jsonify({"error": "Initialisation des statistiques..."}), 503
         team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
         analyses = analyser_course_features(parts, perfs, distance, discipline,
                                              hippodrome, type_corde,
