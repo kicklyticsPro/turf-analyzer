@@ -1554,8 +1554,10 @@ def api_course(r_num, c_num):
                         "ordreArrivee": c.get("ordreArrivee"),
                     }
 
-    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = compute_all_stats(
-        max_days=HISTORY_DAYS)
+    bundle = compute_all_stats(max_days=HISTORY_DAYS)
+    if not bundle:
+        return jsonify({"error": "Initialisation des statistiques..."}), 503
+    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
     analyses = analyser_course(parts, perfs,
                                 course_info.get("distance") if course_info else None,
                                 discipline, hippodrome, type_corde,
@@ -1639,7 +1641,10 @@ def api_train():
 
 @app.route("/api/team-stats")
 def api_team_stats():
-    team_stats, _, _, _, _, _ = compute_all_stats(max_days=HISTORY_DAYS)
+    bundle = compute_all_stats(max_days=HISTORY_DAYS)
+    if not bundle:
+        return jsonify({"error": "Stats non prêtes"}), 503
+    team_stats, _, _, _, _, _ = bundle
     drivers = sorted(team_stats["drivers"].items(),
                     key=lambda x: -(x[1]["v"] if x[1]["c"] >= 10 else 0))[:30]
     entr = sorted(team_stats["entraineurs"].items(),
@@ -1773,8 +1778,12 @@ def api_scan_alerts():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = compute_all_stats(
-        max_days=HISTORY_DAYS)
+    # Récupération des statistiques
+    bundle = compute_all_stats(max_days=HISTORY_DAYS)
+    if not bundle:
+        return jsonify({"error": "Calcul des statistiques en cours, réessayez dans 1 minute"}), 503
+        
+    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
 
     alerts = []
     for r in prog["programme"]["reunions"]:
