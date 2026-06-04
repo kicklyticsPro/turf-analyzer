@@ -556,9 +556,11 @@ def score_distance(perfs_detail, distance_course):
 # ============================================================
 #  ML featurization (v5 = v4)
 # ============================================================
-def featurize(p, nb_partants):
+def featurize(p, nb_partants, race_averages=None):
     s = p["scores"]
-    return [
+    
+    # Base features
+    base_feats = [
         s.get("marche", 0), s.get("forme", 0), s.get("carriere", 0),
         s.get("gains", 0), s.get("driver", 50), s.get("entraineur", 50),
         s.get("distance", 50), s.get("cheval_stats", 50), s.get("elo", 50),
@@ -568,20 +570,41 @@ def featurize(p, nb_partants):
         s.get("musique", 50), s.get("gains_relatifs", 50), s.get("form_ecurie", 50),
         p.get("drop_pct", 0),
         p.get("days_since_last", 60), p.get("nbCourses", 0),
+    ]
+    
+    # NEW v7.2: Interactions Cruciales
+    interaction_feats = [
+        (s.get("elo", 50) * s.get("forme", 50)) / 100.0,      # Puissance réelle actuelle
+        (s.get("driver", 50) * s.get("entraineur", 50)) / 100.0, # Force de la team
+        (s.get("cheval_stats", 50) * s.get("distance", 50)) / 100.0, # Aptitude dist
+    ]
+    
+    # NEW v7.2: Normalisation relative (si moyennes dispo)
+    relative_feats = []
+    if race_averages:
+        # Écart à la moyenne de la course pour les gains et l'elo
+        relative_feats.append(s.get("gains", 0) - race_averages.get("gains", 0))
+        relative_feats.append(s.get("elo", 0) - race_averages.get("elo", 0))
+    else:
+        relative_feats = [0, 0]
+
+    final_vector = base_feats + interaction_feats + relative_feats + [
         nb_partants, 1.0 / max(p.get("cote") or 50, 1),
         p["bonus"].get("team", 0), p["bonus"].get("deferre", 0),
         p.get("age") or 5,
         1 if p.get("sexe") == "FEMELLES" else 0,
     ]
+    return final_vector
 
 
 FEATURE_NAMES = ["marche","forme","carriere","gains","driver","entraineur",
                  "distance","cheval_stats","elo","age_sexe","repos",
                  "elo_trend","confrontation","pedigree","corde","equipment",
                  "profile_match","musique_score","gains_relatifs","form_ecurie",
-                 "odd_drop_pct",
-                 "days_since_last","nb_courses","nb_partants","inv_cote",
-                 "bonus_team","bonus_deferre","age_raw","is_female"]
+                 "odd_drop_pct","days_since_last","nb_courses",
+                 "inter_elo_forme", "inter_team", "inter_dist_apt", # Interactions
+                 "rel_gains", "rel_elo", # Relatifs
+                 "nb_partants","inv_cote","bonus_team","bonus_deferre","age_raw","is_female"]
 
 
 def load_ml_model():
@@ -691,18 +714,38 @@ def _collect_training_data(days_back, exclude_recent, ref_date=None,
                                              team_stats, horse_stats,
                                              elo, elo_hist, horse_races, pedigree)
         nb = len(analyses)
+        
+        # Moyennes pour featurize
+        avg_scores = {}
+        for k in ["gains", "elo"]:
+            vals = [a["scores"].get(k, 0) for a in analyses]
+            avg_scores[k] = sum(vals) / len(vals) if vals else 0
+
         for a in analyses:
-            X.append(featurize(a, nb))
-            real = next((p for p in parts["participants"]
-                        if p.get("numPmu") == a["numPmu"]), None)
-            y.append(1 if real and real.get("ordreArrivee") == 1 else 0)
+        X.append(featurize(a, nb, avg_scores))
+        real = next((p for p in parts["participants"]
+                    if p.get("numPmu") == a["numPmu"]), None)
+        y.append(1 if real and real.get("ordreArrivee") == 1 else 0)
+
+def races_to_xy_advanced(races):
+    X, y = [], []
+    for r in races:
+        # Calcul des moyennes par course
+        avg_g = sum(row["scores"]["gains"] for row in r) / len(r) if r else 0
+        avg_e = sum(row["scores"]["elo"] for row in r) / len(r) if r else 0
+        avgs = {"gains": avg_g, "elo": avg_e}
+        
+        for row in r:
+            X.append(featurize(row, len(r), avgs))
+            y.append(row["label"])
+    return X, y
 
     return X, y
 
 
 def train_ml_model(days_back=21, exclude_recent=0, n_trees_gbm=50, n_trees_rf=30,
-                   model_type="ensemble", xgb_n_trees=100,
-                   mlp_hidden=(32, 16), mlp_epochs=150):
+                   model_type="ensemble", xgb_n_trees=200,
+                   mlp_hidden=(48, 24), mlp_epochs=200):
     """Entraîne un modèle (gbm / rf / xgb / mlp / ensemble / stacking)."""
     try:
         import numpy as np
@@ -713,31 +756,32 @@ def train_ml_model(days_back=21, exclude_recent=0, n_trees_gbm=50, n_trees_rf=30
     if len(X) < 100:
         return None
 
-    print(f"[ML v6] {len(X)} échantillons, {sum(y)} victoires ({sum(y)/len(X)*100:.1f}%)")
+    print(f"[ML v7.2] {len(X)} échantillons, {sum(y)} victoires ({sum(y)/len(X)*100:.1f}%)")
 
     if model_type == "xgb":
-        print(f"[ML v6] Entraînement XGBoost-like ({xgb_n_trees} arbres)...")
-        model = XGBoostLike(n_trees=xgb_n_trees, max_depth=4,
-                            learning_rate=0.1, lambda_reg=1.0, gamma=0.1,
-                            subsample=0.5, early_stopping=10)
+        print(f"[ML v7.2] Entraînement XGBoost-like Tuné ({xgb_n_trees} arbres)...")
+        # Hyperparamètres optimisés pour 35 features (interactions + relatifs)
+        model = XGBoostLike(n_trees=xgb_n_trees, max_depth=5,
+                            learning_rate=0.05, lambda_reg=2.0, gamma=0.2,
+                            subsample=0.6, early_stopping=20)
         model.fit(X, y)
     elif model_type == "gbm":
-        print(f"[ML v6] Entraînement GBM ({n_trees_gbm} arbres)...")
+        print(f"[ML v7.2] Entraînement GBM ({n_trees_gbm} arbres)...")
         model = GradientBoosting(n_trees=n_trees_gbm, max_depth=3, learning_rate=0.1)
         model.fit(X, y)
     elif model_type == "rf":
-        print(f"[ML v6] Entraînement Random Forest ({n_trees_rf} arbres)...")
-        model = RandomForest(n_trees=n_trees_rf, max_depth=8, min_samples=15)
+        print(f"[ML v7.2] Entraînement Random Forest ({n_trees_rf} arbres)...")
+        model = RandomForest(n_trees=n_trees_rf, max_depth=10, min_samples=12)
         model.fit(X, y)
     elif model_type == "mlp":
-        print(f"[ML v6] Entraînement MLP {mlp_hidden} ({mlp_epochs} epochs)...")
+        print(f"[ML v7.2] Entraînement MLP {mlp_hidden} ({mlp_epochs} epochs)...")
         model = MLPClassifier(hidden_sizes=tuple(mlp_hidden), epochs=mlp_epochs,
-                              batch_size=64, dropout=0.2, learning_rate=0.001)
+                              batch_size=64, dropout=0.3, learning_rate=0.001)
         model.fit(X, y)
-        print(f"[ML v6] MLP best epoch: {model.best_epoch}, val_loss: {model.best_val_loss:.4f}")
+        print(f"[ML v7.2] MLP best epoch: {model.best_epoch}, val_loss: {model.best_val_loss:.4f}")
     elif model_type == "stacking":
-        # Stacking : entraîne 3 bases sur 80%, méta-modèle sur 20% restants
-        print("[ML v6] Stacking : entraînement des modèles de base + méta...")
+        # Stacking optimisé : 3 bases fortes
+        print("[ML v7.2] Stacking : entraînement des modèles de base + méta...")
         import numpy as np
         np.random.seed(42)
         n = len(X)
@@ -751,15 +795,15 @@ def train_ml_model(days_back=21, exclude_recent=0, n_trees_gbm=50, n_trees_rf=30
         X_meta = [X[i] for i in meta_idx]
         y_meta = [y[i] for i in meta_idx]
 
-        print("  - Base 1: XGBoost...")
-        b1 = XGBoostLike(n_trees=80, max_depth=4, lambda_reg=1.0, subsample=0.5,
-                         early_stopping=10)
+        print("  - Base 1: XGBoost (Max-Depth 5)...")
+        b1 = XGBoostLike(n_trees=150, max_depth=5, learning_rate=0.05, 
+                         lambda_reg=2.0, subsample=0.6, early_stopping=15)
         b1.fit(X_base, y_base)
-        print("  - Base 2: Random Forest...")
-        b2 = RandomForest(n_trees=30, max_depth=8, min_samples=15)
+        print("  - Base 2: Random Forest (Deep 10)...")
+        b2 = RandomForest(n_trees=50, max_depth=10, min_samples=10)
         b2.fit(X_base, y_base)
-        print("  - Base 3: MLP...")
-        b3 = MLPClassifier(hidden_sizes=(24, 12), epochs=100, dropout=0.2)
+        print("  - Base 3: MLP (Large 48-24)...")
+        b3 = MLPClassifier(hidden_sizes=(48, 24), epochs=150, dropout=0.3)
         b3.fit(X_base, y_base)
 
         print("  - Méta-modèle (logistic sur 20% out-of-fold)...")
@@ -768,7 +812,7 @@ def train_ml_model(days_back=21, exclude_recent=0, n_trees_gbm=50, n_trees_rf=30
         w = model.get_model_weights()
         print(f"  Poids modèles : XGB={w[0]:.2f}, RF={w[1]:.2f}, MLP={w[2]:.2f}")
     else:  # ensemble
-        print(f"[ML v6] Entraînement Ensemble GBM + RF...")
+        print(f"[ML v7.2] Entraînement Ensemble GBM + RF...")
         gbm = GradientBoosting(n_trees=n_trees_gbm, max_depth=3, learning_rate=0.1)
         gbm.fit(X, y)
         rf = RandomForest(n_trees=n_trees_rf, max_depth=8, min_samples=15)
@@ -1026,6 +1070,13 @@ def analyser_course(participants_data, perfs_data=None, distance=None,
     total = sum(chances_heur) or 1
     chances_heur = [c / total * 100 for c in chances_heur]
 
+    # Pré-calcul des moyennes de la course pour normalisation relative
+    avg_scores = {}
+    if analyses:
+        for k in ["gains", "elo"]:
+            vals = [a["scores"].get(k, 0) for a in analyses]
+            avg_scores[k] = sum(vals) / len(vals)
+
     # ml_model/calib peuvent être injectés (walk-forward) ; sinon on charge du disque
     if use_ml and ml_model is None:
         ml_model = load_ml_model()
@@ -1034,7 +1085,7 @@ def analyser_course(participants_data, perfs_data=None, distance=None,
     chances_ml = None
     if ml_model:
         nb = len(analyses)
-        raw_ml = [predict_ml(featurize(a, nb), ml_model, calib) for a in analyses]
+        raw_ml = [predict_ml(featurize(a, nb, avg_scores), ml_model, calib) for a in analyses]
         total_ml = sum(raw_ml) or 1
         chances_ml = [x / total_ml * 100 for x in raw_ml]
 
@@ -1210,25 +1261,23 @@ def backtest(days_back=7, use_ml=False):
 #  WALK-FORWARD BACKTEST (validation temporelle rigoureuse)
 # ============================================================
 def _make_model(model_type):
-    """Fabrique un modèle frais selon le type (mêmes hyperparams que train_ml_model
-    mais en version 'rapide' pour les multiples folds du walk-forward)."""
+    """Fabrique un modèle frais selon le type avec hyperparamètres optimisés v7.2."""
     if model_type == "xgb":
-        return XGBoostLike(n_trees=60, max_depth=4, learning_rate=0.1,
-                           lambda_reg=1.0, gamma=0.1, subsample=0.5,
-                           early_stopping=10)
+        return XGBoostLike(n_trees=150, max_depth=5, learning_rate=0.05,
+                           lambda_reg=2.0, gamma=0.2, subsample=0.6,
+                           early_stopping=15)
     if model_type == "gbm":
-        return GradientBoosting(n_trees=40, max_depth=3, learning_rate=0.1)
+        return GradientBoosting(n_trees=60, max_depth=3, learning_rate=0.1)
     if model_type == "rf":
-        return RandomForest(n_trees=25, max_depth=8, min_samples=15)
+        return RandomForest(n_trees=50, max_depth=10, min_samples=12)
     if model_type == "mlp":
-        return MLPClassifier(hidden_sizes=(24, 12), epochs=100, batch_size=64,
-                             dropout=0.2, learning_rate=0.001)
+        return MLPClassifier(hidden_sizes=(48, 24), epochs=150, batch_size=64,
+                             dropout=0.3, learning_rate=0.001)
     if model_type == "ensemble":
-        gbm = GradientBoosting(n_trees=40, max_depth=3, learning_rate=0.1)
-        rf = RandomForest(n_trees=25, max_depth=8, min_samples=15)
+        gbm = GradientBoosting(n_trees=60, max_depth=3, learning_rate=0.1)
+        rf = RandomForest(n_trees=50, max_depth=10, min_samples=12)
         return ("ensemble", gbm, rf)
-    # défaut : xgb
-    return XGBoostLike(n_trees=60, max_depth=4, subsample=0.5, early_stopping=10)
+    return XGBoostLike(n_trees=150, max_depth=5, subsample=0.6, early_stopping=15)
 
 
 def _fit_fold_model(model_type, X, y):
