@@ -227,7 +227,44 @@ def analyser_course_features(parts_data, perfs_data, dist, disc, hippo, corde, t
         s_gains_rel = get_relative_gains_score(gains_c, all_gains)
         s_form_ec = get_form_ecurie_score(entr, team_stats.get("entraineurs", {}))
         
-        analyses.append({"numPmu": num, "nom": cheval, "age": p.get("age"), "sexe": p.get("sexe"), "driver": driver or "—", "entraineur": entr or "—", "cote": round(1/max(0.001, inv_cotes[i]),1), "probaMarche": round((inv_cotes[i]/total_inv)*100, 2), "gainsCarriere": gains_c//100, "ordreArrivee": p.get("ordreArrivee"), "profile": detect_profile(perfs_by_num.get(num, [])), "scores": {"marche": round((inv_cotes[i]/total_inv)*100, 1), "forme": round(s_forme, 1), "carriere": 50, "gains": round(s_gains, 1), "driver": 50, "entraineur": 50, "distance": 50, "cheval_stats": 50, "elo": get_elo_score(cheval, elo, all_horses), "age_sexe": 50, "repos": 50, "elo_trend": 50, "confrontation": 50, "pedigree": 50, "corde": 50, "equipment": 50, "profile_match": 50, "musique": get_musique_score(p.get("musique")), "gains_relatifs": round(s_gains_rel, 1), "form_ecurie": round(s_form_ec); bonus: {"team": 0, "deferre": 0}}})
+        analyses.append({
+            "numPmu": num,
+            "nom": cheval,
+            "age": p.get("age"),
+            "sexe": p.get("sexe"),
+            "driver": driver or "—",
+            "entraineur": entr or "—",
+            "cote": round(1/max(0.001, inv_cotes[i]), 1),
+            "probaMarche": round((inv_cotes[i]/total_inv)*100, 2),
+            "gainsCarriere": gains_c//100,
+            "ordreArrivee": p.get("ordreArrivee"),
+            "profile": detect_profile(perfs_by_num.get(num, [])),
+            "days_since_last": 30,
+            "drop_pct": 0,
+            "scores": {
+                "marche": round((inv_cotes[i]/total_inv)*100, 1),
+                "forme": round(s_forme, 1),
+                "carriere": 50,
+                "gains": round(s_gains, 1),
+                "driver": 50,
+                "entraineur": 50,
+                "distance": 50,
+                "cheval_stats": 50,
+                "elo": get_elo_score(cheval, elo, all_horses),
+                "age_sexe": 50,
+                "repos": 50,
+                "elo_trend": 50,
+                "confrontation": 50,
+                "pedigree": 50,
+                "corde": 50,
+                "equipment": 50,
+                "profile_match": 50,
+                "musique": get_musique_score(p.get("musique")),
+                "gains_relatifs": round(s_gains_rel, 1),
+                "form_ecurie": round(s_form_ec, 1)
+            },
+            "bonus": {"team": 0, "deferre": 0}
+        })
     return analyses
 
 def analyser_course(parts_data, perfs_data=None, dist=None, disc=None, hippo=None, corde=None, team_stats=None, horse_stats=None, elo=None, elo_hist=None, horse_races=None, pedigree=None, use_ml=False, capital=100, ml_model=None, calib=None):
