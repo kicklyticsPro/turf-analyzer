@@ -558,7 +558,6 @@ def score_distance(perfs_detail, distance_course):
 # ============================================================
 def featurize(p, nb_partants):
     s = p["scores"]
-    prof = p.get("profile", {})
     return [
         s.get("marche", 0), s.get("forme", 0), s.get("carriere", 0),
         s.get("gains", 0), s.get("driver", 50), s.get("entraineur", 50),
@@ -567,8 +566,7 @@ def featurize(p, nb_partants):
         s.get("confrontation", 50), s.get("pedigree", 50),
         s.get("corde", 50), s.get("equipment", 50), s.get("profile_match", 50),
         s.get("musique", 50), s.get("gains_relatifs", 50), s.get("form_ecurie", 50),
-        prof.get("repere", 0), prof.get("prepare", 0),
-        p.get("drop_pct", 0), # NEW Feature #23: Smart Money
+        p.get("drop_pct", 0),
         p.get("days_since_last", 60), p.get("nbCourses", 0),
         nb_partants, 1.0 / max(p.get("cote") or 50, 1),
         p["bonus"].get("team", 0), p["bonus"].get("deferre", 0),
@@ -581,7 +579,6 @@ FEATURE_NAMES = ["marche","forme","carriere","gains","driver","entraineur",
                  "distance","cheval_stats","elo","age_sexe","repos",
                  "elo_trend","confrontation","pedigree","corde","equipment",
                  "profile_match","musique_score","gains_relatifs","form_ecurie",
-                 "signal_repere", "signal_prepare",
                  "odd_drop_pct",
                  "days_since_last","nb_courses","nb_partants","inv_cote",
                  "bonus_team","bonus_deferre","age_raw","is_female"]
@@ -1059,18 +1056,15 @@ def analyser_course(participants_data, perfs_data=None, distance=None,
             a["valueBet"] = is_value
             
             # DÉTECTION GOLD (Raffinement v5)
-            # Un pari GOLD combine avantage mathématique ET signaux qualitatifs forts
-            prof = a.get("profile", {})
-            has_signals = prof.get("repere", 0) > 25 or prof.get("prepare", 0) > 25
+            # Un pari GOLD combine avantage mathématique ET stabilité écurie
             is_stable = a["scores"].get("form_ecurie", 50) > 60
-            
-            a["isGold"] = is_value and has_signals and is_stable
+            a["isGold"] = is_value and is_stable
             
             # DÉTECTION "COUP SÛR" (v7.1 Pro)
-            # Critères ultra-stricts pour le Top 3
+            # Critères adaptés : Top 3 >= 65% + Rang 1 + Forme > 80
             proba_top3 = a.get("chancePlace3", 0)
             is_reliable = a["scores"].get("forme", 0) > 80 and a["profile"].get("fragile", 0) < 15
-            a["isCoupSur"] = proba_top3 >= 75 and a["rang"] == 1 and is_reliable
+            a["isCoupSur"] = proba_top3 >= 65 and a["rang"] == 1 and is_reliable
 
             p = a["chance"] / 100
             a["kellyMise"] = kelly_amount(p, a["cote"], capital, kelly_mult=0.25)
@@ -1101,9 +1095,9 @@ def analyser_course(participants_data, perfs_data=None, distance=None,
         a["chancePlace2"] = round(places_2[i], 2)
         
         # DÉTECTION "COUP SÛR" v7.1
-        # Critères : Probabilité Top 3 > 75% + Favori Analyse + Forme > 80 + Fiabilité profile
+        # Critères : Probabilité Top 3 > 65% + Favori Analyse + Forme > 80
         is_reliable = a["scores"].get("forme", 0) > 80 and a["profile"].get("fragile", 0) < 15
-        a["isCoupSur"] = a["chancePlace3"] >= 75 and a["rang"] == 1 and is_reliable
+        a["isCoupSur"] = a["chancePlace3"] >= 65 and a["rang"] == 1 and is_reliable
 
     return analyses
 
