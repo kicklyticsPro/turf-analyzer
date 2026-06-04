@@ -10,13 +10,13 @@ v5 nouveautés :
   20. Base SQLite persistante (remplace JSON)
 """
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from datetime import datetime, timedelta
 import requests
 import math
 import os
 import pickle
-from functools import lru_cache
+from functools import lru_cache, wraps
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 
@@ -41,6 +41,33 @@ from lib import geny_scraper
 from lib import telegram_bot
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "turf-secret-7.2-elite")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123") # Changez ce mot de passe !
+
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login_page", next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ============================================================
+#  AUTH ROUTES
+# ============================================================
+@app.route("/login", methods=["GET", "POST"])
+def login_page():
+    if request.method == "POST":
+        if request.form.get("password") == ADMIN_PASSWORD:
+            session["logged_in"] = True
+            return redirect(request.args.get("next") or url_for("home"))
+        return render_template("login.html", error="Mot de passe incorrect")
+    return render_template("login.html")
+
+@app.route("/logout")
+def logout():
+    session.pop("logged_in", None)
+    return redirect(url_for("home"))
 
 PMU_BASE = "https://offline.turfinfo.api.pmu.fr/rest/client/61/programme"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; TurfAnalyzer/5.0)"}
@@ -1446,16 +1473,19 @@ def home():
 
 
 @app.route("/backtest")
+@admin_required
 def backtest_page():
     return render_template("backtest.html")
 
 
 @app.route("/paris")
+@admin_required
 def paris_page():
     return render_template("paris.html")
 
 
 @app.route("/dashboard")
+@admin_required
 def dashboard_page():
     return render_template("dashboard.html")
 
@@ -1547,6 +1577,7 @@ def api_course(r_num, c_num):
 
 
 @app.route("/api/backtest")
+@admin_required
 def api_backtest():
     days = int(request.args.get("days", 7))
     use_ml = request.args.get("ml") == "1"
@@ -1558,6 +1589,7 @@ def api_backtest():
 
 
 @app.route("/api/backtest/walkforward", methods=["POST"])
+@admin_required
 def api_walkforward():
     """Backtest temporel rigoureux (walk-forward, sans look-ahead)."""
     data = request.get_json(silent=True) or {}
@@ -1586,6 +1618,7 @@ def api_walkforward():
 
 
 @app.route("/api/train", methods=["POST"])
+@admin_required
 def api_train():
     days = int(request.args.get("days", 21))
     days = min(days, 30)
@@ -1625,6 +1658,7 @@ def api_team_stats():
 #  v5 - Paris (SQLite)
 # ============================================================
 @app.route("/api/bets", methods=["GET"])
+@admin_required
 def api_bets_list():
     statut = request.args.get("statut")
     bets = db.list_bets(statut=statut, limit=500)
@@ -1633,6 +1667,7 @@ def api_bets_list():
 
 
 @app.route("/api/bets", methods=["POST"])
+@admin_required
 def api_bets_add():
     data = request.get_json() or {}
     if not all(k in data for k in ["cheval", "cote", "mise"]):
@@ -1642,6 +1677,7 @@ def api_bets_add():
 
 
 @app.route("/api/bets/<int:bet_id>", methods=["PUT"])
+@admin_required
 def api_bets_update(bet_id):
     data = request.get_json() or {}
     gagne = bool(data.get("gagne"))
@@ -1651,6 +1687,7 @@ def api_bets_update(bet_id):
 
 
 @app.route("/api/bets/<int:bet_id>", methods=["DELETE"])
+@admin_required
 def api_bets_delete(bet_id):
     db.delete_bet(bet_id)
     return jsonify({"ok": True})
@@ -1660,6 +1697,7 @@ def api_bets_delete(bet_id):
 #  v5 - Dashboard
 # ============================================================
 @app.route("/api/dashboard")
+@admin_required
 def api_dashboard():
     days = int(request.args.get("days", 30))
     return jsonify({
@@ -1816,11 +1854,13 @@ def api_geny(r_num, c_num):
 #  v6 - Comparaison de modèles + AutoML
 # ============================================================
 @app.route("/models")
+@admin_required
 def models_page():
     return render_template("models.html")
 
 
 @app.route("/api/models/compare", methods=["POST"])
+@admin_required
 def api_models_compare():
     """Entraîne plusieurs modèles et les compare via CV."""
     days = int(request.args.get("days", 15))
@@ -1882,6 +1922,7 @@ def api_models_compare():
 
 
 @app.route("/api/models/automl", methods=["POST"])
+@admin_required
 def api_models_automl():
     """Recherche aléatoire des meilleurs hyperparamètres pour MLP."""
     days = int(request.args.get("days", 15))
