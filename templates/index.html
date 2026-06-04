@@ -586,7 +586,13 @@ function renderCourse(data) {
         </div>
         <div class="chance-block">
           <div class="chance-pct">${a.chance}%</div>
-          <div class="chance-label">Chance de gagner</div>
+          <div class="chance-label">Gagnant</div>
+          
+          <div class="chance-pct" style="font-size: 18px; margin-top: 8px; color: #94a3b8; background: none; -webkit-text-fill-color: #94a3b8;">
+            ${a.chancePlace3}%
+          </div>
+          <div class="chance-label">Top 3 (Placé)</div>
+
           <div class="chance-bar"><div style="width:${Math.min(a.chance*3, 100)}%"></div></div>
           ${a.cote ? `<div class="cote-tag">Cote ${a.cote}</div>` : ''}
           ${a.edge !== 0 ? `<div class="edge-tag ${a.edge<0?'negative':''}">Edge ${a.edge>0?'+':''}${a.edge}%</div>` : ''}
@@ -841,5 +847,5 @@ async function confirmBet() {
 document.getElementById('datePicker').value = todayStr();
 loadReunions();
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a05ef1484aa1137e',t:'MTc4MDQ5MjI3Mw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
