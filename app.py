@@ -99,7 +99,7 @@ except Exception as e:
     print(f"[Migration] {e}")
 
 WINDOW_SHORT = 30
-HISTORY_DAYS = 180
+HISTORY_DAYS = 60 # Réduit de 180 à 60 pour la stabilité VPS
 
 # v7.1 — réglages issus de l'optimisation walk-forward (sans look-ahead)
 # Calibration sur un hold-out (anti-optimisme) + poids du blend heuristique/ML.
@@ -709,7 +709,9 @@ def _collect_training_data(days_back, exclude_recent, ref_date=None,
     if stats_bundle is not None:
         team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = stats_bundle
     else:
-        team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = compute_all_stats(
+        bundle = compute_all_stats(
+    if not bundle: return jsonify({"error": "Initialisation..."}), 503
+    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
             max_days=max(HISTORY_DAYS, days_back + exclude_recent),
             ref_date=ref_date)
 
@@ -1184,7 +1186,9 @@ def analyser_course(participants_data, perfs_data=None, distance=None,
 #  Backtest v5
 # ============================================================
 def backtest(days_back=7, use_ml=False):
-    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = compute_all_stats(
+    bundle = compute_all_stats(
+    if not bundle: return jsonify({"error": "Initialisation..."}), 503
+    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
         max_days=HISTORY_DAYS)
     today = datetime.now()
     results = {
@@ -1352,6 +1356,8 @@ def walk_forward_backtest(n_folds=4, train_window=30, test_window=7, gap=1,
         # ref_date = lendemain de train_end => n'inclut que train_end et avant.
         stats_ref = train_end + timedelta(days=1)
         stats_bundle = compute_all_stats(max_days=stats_window, ref_date=stats_ref)
+    if not bundle: return jsonify({"error": "Initialisation..."}), 503
+    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
 
         fold = {"fold": f["fold"], **fmt_window(f),
                 "n_test_courses": 0, "n_test_samples": 0,
@@ -1555,6 +1561,8 @@ def api_course(r_num, c_num):
                     }
 
     bundle = compute_all_stats(max_days=HISTORY_DAYS)
+    if not bundle: return jsonify({"error": "Initialisation..."}), 503
+    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
     if not bundle:
         return jsonify({"error": "Initialisation des statistiques..."}), 503
     team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
@@ -1642,6 +1650,8 @@ def api_train():
 @app.route("/api/team-stats")
 def api_team_stats():
     bundle = compute_all_stats(max_days=HISTORY_DAYS)
+    if not bundle: return jsonify({"error": "Initialisation..."}), 503
+    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
     if not bundle:
         return jsonify({"error": "Stats non prêtes"}), 503
     team_stats, _, _, _, _, _ = bundle
@@ -1780,6 +1790,8 @@ def api_scan_alerts():
 
     # Récupération des statistiques
     bundle = compute_all_stats(max_days=HISTORY_DAYS)
+    if not bundle: return jsonify({"error": "Initialisation..."}), 503
+    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
     if not bundle:
         return jsonify({"error": "Calcul des statistiques en cours, réessayez dans 1 minute"}), 503
         
@@ -1986,7 +1998,9 @@ def api_explain(r_num, c_num, num_pmu):
                         type_corde = c.get("corde", "")
                         distance = c.get("distance")
 
-        team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = compute_all_stats()
+        bundle = compute_all_stats()
+    if not bundle: return jsonify({"error": "Initialisation..."}), 503
+    team_stats, horse_stats, elo, elo_hist, horse_races, pedigree = bundle
         analyses = analyser_course_features(parts, perfs, distance, discipline,
                                              hippodrome, type_corde,
                                              team_stats, horse_stats, elo,
