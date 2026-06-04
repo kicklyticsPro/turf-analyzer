@@ -98,10 +98,15 @@
   <h1>🐎 Turf Analyzer — Mes paris</h1>
   <div class="nav-links">
     <a href="/">Analyse</a>
-    <a href="/backtest">Backtest & ML</a>
-    <a href="/paris" class="active">📋 Mes paris</a>
-    <a href="/dashboard">📊 Dashboard</a>
-    <a href="/models">🧠 Modèles</a>
+    {% if session.get('logged_in') %}
+      <a href="/backtest">Backtest & ML</a>
+      <a href="/paris" class="active">📋 Mes paris</a>
+      <a href="/dashboard">📊 Dashboard</a>
+      <a href="/models">🧠 Modèles</a>
+      <a href="/logout" style="color: #ef4444;">Sortie</a>
+    {% else %}
+      <a href="/login" style="border: 1px solid #334155;">🔐 Admin</a>
+    {% endif %}
   </div>
 </header>
 
@@ -196,5 +201,5 @@ async function deleteBet(id) {
 
 loadBets();
 </script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a06683f57b9cd146',t:'MTc4MDU3MTY4Mg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
