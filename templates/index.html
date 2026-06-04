@@ -511,7 +511,7 @@ function renderCourse(data) {
         <span class="icon">✅</span>
         <div>
           <b>COUP SÛR DÉTECTÉ : ${coupSur.nom} (#${coupSur.numPmu})</b><br>
-          <span style="font-size:11px;color:#94a3b8;">Confiance Top 3 : ${coupSur.chancePlace3}% | Ce cheval présente des garanties statistiques exceptionnelles.</span>
+          <span style="font-size:11px;color:#94a3b8;">Confiance Top 3 : ${coupSur.chancePlace3}%</span>
         </div>
       </div>
     `;
@@ -547,10 +547,6 @@ function renderCourse(data) {
     if (a.scores.repos >= 80) badges.push('<span class="badge good">😌 Repos</span>');
     if (a.scores.pedigree >= 70) badges.push(`<span class="badge" style="background:#a855f7;color:white;">🧬 Lignée</span>`);
     if (a.scores.corde >= 65) badges.push('<span class="badge good">📍 Bonne corde</span>');
-    
-    // NEW v7.1 Signaux sémantiques
-    if (a.profile.repere > 30) badges.push('<span class="badge" style="background:#ef4444;color:white;">🔥 Malheureux</span>');
-    if (a.profile.prepare > 30) badges.push('<span class="badge" style="background:#f59e0b;color:#0f172a;">🎯 Préparé</span>');
 
     const classes = ['horse', topClass, isWinner?'winner':'', isValueBet?'value-bet':'', a.isGold?'gold':'', a.isCoupSur?'coup-sur':''].filter(x=>x).join(' ');
 
@@ -619,8 +615,6 @@ function renderCourse(data) {
           <div class="score-item" style="background:#1e293b;"><div class="lbl">Musique</div><div class="val">${a.scores.musique}</div></div>
           <div class="score-item" style="background:#1e293b;"><div class="lbl">Richesse</div><div class="val">${a.scores.gains_relatifs}</div></div>
           <div class="score-item team" style="background:#1e293b;"><div class="lbl">Écurie</div><div class="val">${a.scores.form_ecurie}</div></div>
-          <div class="score-item" style="background:#7f1d1d;"><div class="lbl">Malh.</div><div class="val">${Math.round(a.profile.repere)}</div></div>
-          <div class="score-item" style="background:#064e3b;"><div class="lbl">Prép.</div><div class="val">${Math.round(a.profile.prepare)}</div></div>
         </div>
       </div>
     `;
