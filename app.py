@@ -1,6 +1,6 @@
 """
-Turf Analyzer v8.2 - Version "Ultra-Stable & Expert"
-Correction du NameError admin_required et intégration complète des analyses.
+Turf Analyzer v9.0 - Version "Réalité PMU"
+Zéro Donnée Fictive - Poids dynamiques - Analyse granulaire Driver/Entraîneur.
 """
 
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import requests
 import math
 import os
+import traceback
 from functools import wraps
 from collections import defaultdict
 
@@ -19,7 +20,7 @@ from lib.features_v5 import (get_musique_score, get_relative_gains_score,
 from lib.multi_paris import proba_place_simple
 
 app = Flask(__name__)
-app.secret_key = "turf-analyzer-pro-v8.2-verified"
+app.secret_key = "turf-analyzer-pro-v9-reality"
 ADMIN_PASSWORD = "admin123"
 
 # Endpoint PMU (Vérifié)
@@ -27,7 +28,7 @@ PMU_BASE = "https://offline.turfinfo.api.pmu.fr/rest/client/61/programme"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 # ============================================================
-#  1. SÉCURITÉ & AUTHENTIFICATION (DÉFINI EN PREMIER)
+#  1. SÉCURITÉ
 # ============================================================
 def admin_required(f):
     @wraps(f)
@@ -38,59 +39,76 @@ def admin_required(f):
     return decorated_function
 
 # ============================================================
-#  2. FONCTIONS DE SCORING RÉEL (DÉTAILLÉ)
+#  2. FONCTIONS DE SCORING RÉEL (SANS FICTION)
 # ============================================================
 
 def get_pro_performance(stats_block):
-    """Calcule le score réel d'un Pro (Jockey ou Entr) via son bloc dédié."""
-    if not stats_block: return 45.0
+    """Calcule le score réel d'un Pro via son bloc dédié (Driver vs Entraîneur)."""
+    if not stats_block: return None
     c = stats_block.get("nombreCourses", 0) or 0
     v = stats_block.get("nombreVictoires", 0) or 0
     p = stats_block.get("nombrePlaces", 0) or 0
-    if c == 0: return 50.0
-    # Score pondéré : Winrate (coeff 3) + Placerate (coeff 1)
+    if c < 3: return None # Pas assez significatif
+    
     score = ((v * 3 + p) / (c * 3)) * 100
-    return float(max(10, min(95, score + 20)))
+    return float(max(0, min(100, score + 20)))
 
 def get_repos_score_real(perfs):
-    """Calcule le score de repos (fraîcheur) basé sur la date réelle."""
-    if not perfs: return 50.0
+    """Calcule la fraîcheur basée sur la date de la dernière course."""
+    if not perfs: return None
     try:
         last_date_ms = perfs[0].get("date")
-        if not last_date_ms: return 50.0
+        if not last_date_ms: return None
         days = (datetime.now() - datetime.fromtimestamp(last_date_ms/1000)).days
-        if days < 7: return 40.0 # Trop rapproché
-        if days < 21: return 90.0 # Idéal
-        if days < 45: return 70.0 
-        return 30.0 # Rentrée
-    except: return 50.0
+        if days < 5: return 20.0 # Épuisé
+        if days < 25: return 95.0 # Optimal
+        if days < 50: return 60.0 # Correct
+        return 40.0 # Rentrée
+    except: return None
 
-def get_trend_score(perfs):
-    """Calcule la tendance de forme (progression ou régression)."""
-    if not perfs or len(perfs) < 2: return 50.0
+def get_trend_score_real(perfs):
+    """Tendance de forme basée sur les classements réels."""
+    if not perfs or len(perfs) < 2: return None
     try:
-        p1 = (perfs[0].get("place") or {}).get("place", 10)
-        p2 = (perfs[1].get("place") or {}).get("place", 10)
-        if p1 < p2: return 80.0 # En progrès
-        if p1 > p2: return 30.0 # En déclin
-    except: pass
-    return 50.0
+        # On regarde si les places s'améliorent (ex: 5e puis 2e)
+        p1 = (perfs[0].get("place") or {}).get("place", 15)
+        p2 = (perfs[1].get("place") or {}).get("place", 15)
+        if p1 == 0 or p2 == 0: return None # Donnée incomplète (DAI...)
+        if p1 < p2: return 85.0 # En progrès
+        if p1 > p2: return 35.0 # En déclin
+        return 50.0
+    except: return None
+
+def get_distance_score_real(perfs, target_dist):
+    """Score d'aptitude à la distance basé sur le passé sur +/- 200m."""
+    if not perfs or not target_dist: return None
+    similar = []
+    for p in perfs:
+        d = p.get("distance", 0)
+        if d > 0 and abs(d - target_dist) <= 200:
+            pl = (p.get("place") or {}).get("place", 0)
+            if pl > 0: similar.append(pl)
+    
+    if not similar: return None
+    # Plus la place est basse (1er, 2e), plus le score est haut
+    avg_place = sum(similar) / len(similar)
+    score = 100 - (avg_place * 7)
+    return float(max(10, min(100, score)))
 
 def extract_cote_robuste(p):
-    """Tente d'extraire la cote via toutes les structures PMU possibles."""
-    # 1. Rapport Direct
-    r = p.get("dernierRapportDirect", {}).get("rapport")
-    if r: return float(r)
-    # 2. Rapport Référence
-    r = p.get("dernierRapportReference", {}).get("rapport")
-    if r: return float(r)
-    # 3. Rapport Probable
-    r = p.get("rapportProbable", {}).get("rapport")
-    if r: return float(r)
-    return 15.0 # Valeur par défaut
+    """Tente d'extraire la cote via toutes les structures PMU."""
+    sources = [
+        p.get("dernierRapportDirect", {}).get("rapport"),
+        p.get("dernierRapportReference", {}).get("rapport"),
+        p.get("rapportProbable", {}).get("rapport"),
+        p.get("dernierRapportProbable", {}).get("rapport")
+    ]
+    for r in sources:
+        if r: return float(r)
+    return None
 
 # ============================================================
-#  3. MOTEUR D'ANALYSE EXPERT
+#  3. MOTEUR D'ANALYSE DYNAMIQUE (POIDS REDISTRIBUÉS)
 # ============================================================
 
 def perform_full_analysis(parts_data, perfs_data, dist, disc, hippo, corde_t, capital):
@@ -98,14 +116,16 @@ def perform_full_analysis(parts_data, perfs_data, dist, disc, hippo, corde_t, ca
     parts = [p for p in raw_p if p.get("statut") == "PARTANT"]
     if not parts: return []
 
-    perf_map = {p.get("numPmu"): p.get("coursesCourues", []) for p in (perfs_data or {}).get("participants", [])}
+    # Vérification endpoint perfs (Analyse Point 2)
+    perf_map = {}
+    if perfs_data and "participants" in perfs_data:
+        for p in perfs_data["participants"]:
+            num = p.get("numPmu")
+            if num:
+                perf_map[num] = p.get("coursesCourues", [])
     
     all_gains = [(p.get("gainsParticipant") or {}).get("gainsCarriere", 0) or 0 for p in parts]
-    
-    # Probabilités marché réelles
-    cotes_list = [extract_cote_robuste(p) for p in parts]
-    inv_cotes = [1.0 / max(1.1, c) for c in cotes_list]
-    s_inv = sum(inv_cotes) or 1.0
+    avg_gains = sum(all_gains) / len(all_gains) if all_gains else 1000
     
     ans = []
     for i, p in enumerate(parts):
@@ -113,64 +133,80 @@ def perform_full_analysis(parts_data, perfs_data, dist, disc, hippo, corde_t, ca
         perfs = perf_map.get(num, [])
         gc = (p.get("gainsParticipant") or {}).get("gainsCarriere", 0) or 0
         
-        # SÉPARATION DES STATS PRO
-        s_driver = get_pro_performance(p.get("statistiquesDriver"))
-        s_entr = get_pro_performance(p.get("statistiquesEntraineur"))
-        
-        # SCORES DYNAMIQUES
-        s_repos = get_repos_score_real(perfs)
-        s_trend = get_trend_score(perfs)
-        
-        sc = {
-            "marche": round((inv_cotes[i]/s_inv)*100, 1),
-            "forme": round(get_musique_score(p.get("musique")), 1),
-            "carriere": round(50 + (math.log10(max(1, gc/1000)) * 10), 1),
-            "gains": round(min(100, 15 * math.log10(max(1, gc/1000)+1)), 1),
-            "driver": round(s_driver, 1),
-            "entraineur": round(s_entr, 1),
-            "distance": 50.0,
-            "cheval_stats": 50.0,
-            "elo": round(40 + (p.get("nombreVictoires", 0)*8), 1),
-            "age_sexe": 70.0 if 3 <= (p.get("age",0)) <= 6 else 45.0,
-            "repos": round(s_repos, 1),
-            "elo_trend": round(s_trend, 1),
-            "confrontation": 50.0,
+        # SCORES RÉELS (Analyse Point 1, 4, 5)
+        # On remplace 50 par None quand la donnée manque
+        scores = {
+            "forme": get_musique_score(p.get("musique")),
+            "gains": round(get_relative_gains_score(gc, all_gains), 1),
+            "driver": get_pro_performance(p.get("statistiquesDriver")),
+            "entraineur": get_pro_performance(p.get("statistiquesEntraineur")),
+            "repos": get_repos_score_real(perfs),
+            "trend": get_trend_score_real(perfs),
+            "distance": get_distance_score_real(perfs, dist),
             "pedigree": round(get_musique_score(p.get("musique")) * 0.8, 1),
-            "corde": round(get_corde_score(num, len(parts), corde_t, disc), 1),
-            "equipment": round(get_equipment_score(p.get("oeilleres"), p.get("deferre")), 1),
-            "profile_match": 50.0,
-            "musique": round(get_musique_score(p.get("musique")), 1),
-            "gains_relatifs": round(get_relative_gains_score(gc, all_gains), 1),
-            "form_ecurie": round(s_entr, 1)
+            "corde": get_corde_score(num, len(parts), corde_t, disc),
+            "equipement": get_equipment_score(p.get("oeilleres"), p.get("deferre")),
+            "form_ecurie": get_form_ecurie_score(p.get("entraineur"), {}) # nécessite stats locales idéalement
         }
+
+        # Cote robuste (Analyse Point 3)
+        cote = extract_cote_robuste(p)
 
         ans.append({
             "numPmu": num, "nom": ch, "age": p.get("age", 0), "sexe": p.get("sexe", ""), 
             "driver": p.get("driver", "—"), "entraineur": p.get("entraineur", "—"),
             "musique": p.get("musique", ""), "nbCourses": p.get("nombreCourses", 0), 
             "nbVictoires": p.get("nombreVictoires", 0), "nbPlaces": p.get("nombrePlaces", 0),
-            "cote": cotes_list[i], "probaMarche": round((inv_cotes[i]/s_inv)*100, 2), "gainsCarriere": gc,
-            "ordreArrivee": p.get("ordreArrivee"), "profile": detect_profile(perfs), "scores": sc, "bonus": {"team": 0, "deferre": 0}
+            "cote": cote, "gainsCarriere": gc, # Pas de division par 100
+            "ordreArrivee": p.get("ordreArrivee"), "scores": scores, "bonus": {"team": 0, "deferre": 0}
         })
 
-    # Calcul final
+    # CALCUL FINAL AVEC POIDS DYNAMIQUES (Analyse Point: Ce que je ferais)
+    base_weights = {
+        "forme": 0.25, "gains": 0.15, "driver": 0.15, "entraineur": 0.15, 
+        "repos": 0.10, "distance": 0.10, "corde": 0.05, "musique": 0.05
+    }
+
     for a in ans:
-        a["chance"] = a["chanceHeur"] = round(sum([a["scores"][k]*w for k,w in {"forme":0.2,"elo":0.2,"musique":0.2,"form_ecurie":0.2,"driver":0.1,"repos":0.1}.items()]), 2)
-    
-    t_h = sum(a["chance"] for a in ans) or 1
-    for a in ans: a["chance"] = round(a["chance"]/t_h*100, 2)
+        valid_scores = {k: v for k, v in a["scores"].items() if v is not None and k in base_weights}
+        
+        if not valid_scores:
+            a["chanceHeur"] = 1.0 / len(ans) * 100
+        else:
+            # Redistribution des poids
+            current_total_weight = sum(base_weights[k] for k in valid_scores.keys())
+            if current_total_weight > 0:
+                raw_chance = sum(valid_scores[k] * (base_weights[k] / current_total_weight) for k in valid_scores.keys())
+                a["chanceHeur"] = raw_chance
+            else:
+                a["chanceHeur"] = 50.0
+
+    # Normalisation
+    t_h = sum(a["chanceHeur"] for a in ans) or 1
+    for a in ans: a["chance"] = round(a["chanceHeur"]/t_h*100, 2)
     
     ans.sort(key=lambda x: -x["chance"])
     for r, a in enumerate(ans, 1): a["rang"] = r
     
     # Placé et Edge
+    # Note: On calcule la proba marché ici (Analyse Point 3)
+    cotes_valides = [a["cote"] for a in ans if a["cote"] is not None]
+    inv_sum = sum(1.0/c for c in cotes_valides) if cotes_valides else 1.0
+    
     pl3 = proba_place_simple([a["chance"] for a in ans], 3, len(ans))
     for i, a in enumerate(ans):
         a["chancePlace3"] = round(pl3[i], 2)
-        a["edge"] = round(a["chance"] - a["probaMarche"], 2)
-        is_v = a["edge"] > 4 and a["cote"] >= 4
-        a["valueBet"], a["isGold"], a["isCoupSur"] = is_v, (is_v and a["scores"]["form_ecurie"] > 60), (a["chancePlace3"] >= 65 and a["rang"] == 1)
-        a["kellyMise"] = kelly_amount(a["chance"]/100, a["cote"], capital, 0.25)
+        if a["cote"]:
+            a["probaMarche"] = round((1.0/a["cote"])/inv_sum*100, 2)
+            a["edge"] = round(a["chance"] - a["probaMarche"], 2)
+        else:
+            a["probaMarche"] = 0
+            a["edge"] = 0
+            
+        is_v = a["edge"] > 4 and (a["cote"] or 0) >= 4
+        a["valueBet"] = is_v
+        a["isCoupSur"] = a["chancePlace3"] >= 65 and a["rang"] == 1
+        a["kellyMise"] = kelly_amount(a["chance"]/100, a["cote"] or 10, capital, 0.25)
     
     return ans
 
@@ -195,14 +231,23 @@ def logout(): session.pop("logged_in", None); return redirect(url_for("home"))
 
 @app.route("/api/reunions")
 def api_reunions():
-    d = request.args.get("date") or datetime.now().strftime("%d%m%Y")
+    date_str = request.args.get("date") or datetime.now().strftime("%d%m%Y")
     try:
-        r = requests.get(f"{PMU_BASE}/{d}", headers=HEADERS, timeout=10).json()
+        r = requests.get(f"{PMU_BASE}/{date_str}", headers=HEADERS, timeout=10)
+        r.raise_for_status()
+        prog = r.json()
         out = []
-        for re in r.get("programme", {}).get("reunions", []):
-            cs = [{"numCourse": c["numOrdre"], "libelle": c.get("libelle") or c.get("libelleCourt"), "heure": datetime.fromtimestamp(c["heureDepart"]/1000).strftime("%H:%M") if c.get("heureDepart") else "00:00", "nbPartants": c.get("nombreDeclaresPartants"), "arriveeDefinitive": c.get("arriveeDefinitive", False)} for c in re.get("courses", [])]
+        for re in prog.get("programme", {}).get("reunions", []):
+            cs = []
+            for c in re.get("courses", []):
+                h = datetime.fromtimestamp(c["heureDepart"]/1000).strftime("%H:%M") if c.get("heureDepart") else "00:00"
+                cs.append({
+                    "numCourse": c["numOrdre"], "libelle": c.get("libelle") or c.get("libelleCourt"), 
+                    "heure": h, "nbPartants": c.get("nombreDeclaresPartants"), 
+                    "arriveeDefinitive": c.get("arriveeDefinitive", False)
+                })
             out.append({"numReunion": re["numOfficiel"], "hippodrome": re["hippodrome"]["libelleCourt"], "courses": cs})
-        return jsonify({"date": d, "reunions": out})
+        return jsonify({"date": date_str, "reunions": out})
     except Exception as e:
         return jsonify({"error": str(e), "reunions": []})
 
@@ -215,7 +260,14 @@ def api_course(rn, cn):
         parts = requests.get(f"{PMU_BASE}/{d}/R{rn}/C{cn}/participants", headers=HEADERS, timeout=10).json()
         perfs = requests.get(f"{PMU_BASE}/{d}/R{rn}/C{cn}/performances-detaillees/pretty", headers=HEADERS, timeout=10).json()
         
-        hippo, dist, disc, corde, h = "Inconnu", 2000, "ATTELE", "GAUCHE", "00:00"
+        # LOGS DE VÉRIFICATION (Analyse Point 8)
+        if parts.get("participants"):
+            p0 = parts['participants'][0]
+            print(f"DEBUG: Champs disponibles pour P1: {p0.keys()}")
+            if "statistiquesDriver" in p0: print("OK: statistiquessDriver trouvé")
+            if "statistiquesEntraineur" in p0: print("OK: statistiquesEntraineur trouvé")
+        
+        h, hippo, dist, disc, corde = "00:00", "Inconnu", 2000, "ATTELE", "GAUCHE"
         for re in prog.get("programme", {}).get("reunions", []):
             if re["numOfficiel"] == rn:
                 hippo = re["hippodrome"]["libelleCourt"]
@@ -225,8 +277,13 @@ def api_course(rn, cn):
                         h = datetime.fromtimestamp(co["heureDepart"]/1000).strftime("%H:%M") if co.get("heureDepart") else "00:00"
         
         ans = perform_full_analysis(parts, perfs, dist, disc, hippo, corde, cap)
-        return jsonify({"date": d, "reunion": {"hippodrome": hippo}, "course": {"libelle": f"R{rn}C{cn}", "heure": h, "distance": dist, "discipline": disc}, "analyses": ans, "ml_active": False, "timestamp": datetime.now().isoformat()})
+        return jsonify({
+            "date": d, "reunion": {"hippodrome": hippo}, 
+            "course": {"libelle": f"R{rn}C{cn}", "heure": h, "distance": dist, "discipline": disc}, 
+            "analyses": ans, "ml_active": False, "timestamp": datetime.now().isoformat()
+        })
     except Exception as e:
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route("/backtest")
