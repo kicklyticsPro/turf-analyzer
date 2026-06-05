@@ -5,6 +5,7 @@ from functools import lru_cache, wraps
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 
+# Imports Libs
 from lib.ml_models import (GradientBoosting, RandomForest, Ensemble, load_model_from_dict)
 from lib.xgb_like import XGBoostLike
 from lib.kelly import kelly_amount, kelly_fraction, expected_roi
@@ -15,10 +16,11 @@ from lib.calibration import Calibrator
 from lib import db, telegram_bot
 
 app = Flask(__name__)
-app.secret_key = "turf-secret-7.2-pro-stable"
+app.secret_key = "turf-secret-7.2-pro-ultra-stable"
 ADMIN_PASSWORD = "admin123"
 
-HISTORY_DAYS = 30
+# On limite à 15 jours pour le premier lancement sur VPS pour éviter les timeouts
+HISTORY_DAYS = 15
 ML_BLEND_WEIGHT = 0.55
 PMU_BASE = "https://offline.turfinfo.api.pmu.fr/rest/client/61/programme"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -48,7 +50,8 @@ def get_elo_score(ch, elo, all_h):
     elos = [elo.get(h, 1500) for h in all_h if h]
     if len(elos) < 2: return 50
     e_min, e_max = min(elos), max(elos)
-    return (my - e_min) / max(1, e_max - e_min) * 100
+    if e_max == e_min: return 50
+    return (my - e_min) / (e_max - e_min) * 100
 
 def safe_compute_stats():
     try:
@@ -95,19 +98,18 @@ def analyser_course(parts_data, perfs_data, b, capital=100):
     parts = [p for p in parts_data.get("participants", []) if p.get("statut") == "PARTANT"]
     if not parts: return []
     perf_map = {p.get("numPmu"): p.get("coursesCourues", []) for p in (perfs_data or {}).get("participants", [])}
-    all_h = [p.get("nom") for p in parts]
-    all_g = [(p.get("gainsParticipant") or {}).get("gainsCarriere", 0) for p in parts]
+    all_h, all_g = [p.get("nom") for p in parts], [(p.get("gainsParticipant") or {}).get("gainsCarriere", 0) for p in parts]
     ans = []
     for i, p in enumerate(parts):
-        num, ch, dr, en = p.get("numPmu"), p.get("nom"), p.get("driver"), p.get("entraineur")
+        num, ch, en = p.get("numPmu"), p.get("nom"), p.get("entraineur")
         gc = (p.get("gainsParticipant") or {}).get("gainsCarriere", 0)
         s_f = score_forme_enrichi(perf_map.get(num, []))
         s_g = min(100, 15 * math.log10(max(gc/1000, 1) + 1))
         ans.append({
-            "numPmu": num, "nom": ch, "age": p.get("age"), "sexe": p.get("sexe"), "driver": dr or "—", "entraineur": en or "—",
+            "numPmu": num, "nom": ch, "age": p.get("age"), "sexe": p.get("sexe"), "driver": p.get("driver") or "—", "entraineur": en or "—",
             "cote": float(p.get("dernierRapportDirect",{}).get("rapport") or p.get("dernierRapportReference",{}).get("rapport") or 10), "probaMarche": 10, "gainsCarriere": gc//100,
             "scores": {"marche": 10, "forme": round(s_f, 1), "carriere": 50, "gains": round(s_g, 1), "driver": 50, "entraineur": 50, "distance": 50, "cheval_stats": 50, "elo": get_elo_score(ch, b[2], all_h), "musique": get_musique_score(p.get("musique")), "form_ecurie": get_form_ecurie_score(en, b[0].get("entraineurs", {}))},
-            "bonus": {"team": 0, "deferre": 0}, "profile": {"fragile": 0, "repere": 0, "prepare": 0}
+            "bonus": {"team": 0, "deferre": 0}, "profile": {"fragile": 0}
         })
     for a in ans: a["chance"] = a["chanceHeur"] = round(sum([a["scores"][k]*w for k,w in {"forme":0.25,"gains":0.15,"elo":0.3,"musique":0.15,"form_ecurie":0.15}.items()]), 2)
     ans.sort(key=lambda x: -x["chance"])
@@ -127,9 +129,7 @@ def home(): return render_template("index.html")
 @app.route("/login", methods=["GET", "POST"])
 def login_page():
     if request.method == "POST":
-        if request.form.get("password") == ADMIN_PASSWORD:
-            session["logged_in"] = True
-            return redirect(url_for("home"))
+        if request.form.get("password") == ADMIN_PASSWORD: session["logged_in"] = True; return redirect(url_for("home"))
         return render_template("login.html", error="Incorrect")
     return render_template("login.html")
 
@@ -141,7 +141,13 @@ def api_reunions():
     d = request.args.get("date") or fmt_date(datetime.now())
     prog = get_programme(d)
     if not prog: return jsonify({"reunions": []})
-    out = [{"numReunion": r["numOfficiel"], "hippodrome": r["hippodrome"]["libelleCourt"], "courses": [{"numCourse": c["numOrdre"], "libelle": c.get("libelle") or c.get("libelleCourt"), "heure": "00:00", "nbPartants": c.get("nombreDeclaresPartants"), "arriveeDefinitive": c.get("arriveeDefinitive", False)} for c in r["courses"]]} for r in prog["programme"]["reunions"]]
+    out = []
+    for r in prog["programme"]["reunions"]:
+        courses = []
+        for c in r["courses"]:
+            h = datetime.fromtimestamp(c["heureDepart"]/1000).strftime("%H:%M") if c.get("heureDepart") else "00:00"
+            courses.append({"numCourse": c["numOrdre"], "libelle": c.get("libelle") or c.get("libelleCourt"), "heure": h, "nbPartants": c.get("nombreDeclaresPartants"), "arriveeDefinitive": c.get("arriveeDefinitive", False)})
+        out.append({"numReunion": r["numOfficiel"], "hippodrome": r["hippodrome"]["libelleCourt"], "courses": courses})
     return jsonify({"date": d, "reunions": out})
 
 @app.route("/api/course/<int:r_num>/<int:c_num>")
@@ -150,16 +156,14 @@ def api_course(r_num, c_num):
     try:
         prog = get_programme(d)
         parts, perfs = get_participants(d, r_num, c_num), get_performances(d, r_num, c_num)
-        h, hippo = "00:00", "Inconnu"
-        dist, disc = 2000, "ATTELE"
+        h, hippo, dist, disc = "00:00", "Inconnu", 2000, "ATTELE"
         for r in prog["programme"]["reunions"]:
             if r["numOfficiel"] == r_num:
                 hippo = r["hippodrome"]["libelleCourt"]
                 for c in r["courses"]:
-                    if c["numOrdre"] == c_num: 
-                        h = "00:00"
-                        dist = c.get("distance", 2000)
-                        disc = c.get("discipline", "ATTELE")
+                    if c["numOrdre"] == c_num:
+                        h = datetime.fromtimestamp(c["heureDepart"]/1000).strftime("%H:%M") if c.get("heureDepart") else "00:00"
+                        dist, disc = c.get("distance", 2000), c.get("discipline", "ATTELE")
         ans = analyser_course(parts, perfs, safe_compute_stats())
         return jsonify({"date": d, "reunion": {"hippodrome": hippo}, "course": {"libelle": f"R{r_num}C{c_num}", "heure": h, "distance": dist, "discipline": disc}, "analyses": ans, "ml_active": False, "timestamp": datetime.now().isoformat()})
     except Exception as e: return jsonify({"error": str(e)}), 500
