@@ -1,6 +1,6 @@
 """
-Turf Analyzer v8.1 - Version "Expert API"
-Correction intégrale selon analyse : Séparation Pro, Repos dynamique, Cotes robustes.
+Turf Analyzer v8.2 - Version "Ultra-Stable & Expert"
+Correction du NameError admin_required et intégration complète des analyses.
 """
 
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
@@ -19,7 +19,7 @@ from lib.features_v5 import (get_musique_score, get_relative_gains_score,
 from lib.multi_paris import proba_place_simple
 
 app = Flask(__name__)
-app.secret_key = "turf-analyzer-pro-v8.1-expert"
+app.secret_key = "turf-analyzer-pro-v8.2-verified"
 ADMIN_PASSWORD = "admin123"
 
 # Endpoint PMU (Vérifié)
@@ -27,7 +27,18 @@ PMU_BASE = "https://offline.turfinfo.api.pmu.fr/rest/client/61/programme"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 # ============================================================
-#  FONCTIONS DE SCORING RÉEL (DÉTAILLÉ)
+#  1. SÉCURITÉ & AUTHENTIFICATION (DÉFINI EN PREMIER)
+# ============================================================
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login_page", next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ============================================================
+#  2. FONCTIONS DE SCORING RÉEL (DÉTAILLÉ)
 # ============================================================
 
 def get_pro_performance(stats_block):
@@ -76,10 +87,10 @@ def extract_cote_robuste(p):
     # 3. Rapport Probable
     r = p.get("rapportProbable", {}).get("rapport")
     if r: return float(r)
-    return 15.0 # Valeur par défaut si rien n'est trouvé
+    return 15.0 # Valeur par défaut
 
 # ============================================================
-#  MOTEUR D'ANALYSE EXPERT
+#  3. MOTEUR D'ANALYSE EXPERT
 # ============================================================
 
 def perform_full_analysis(parts_data, perfs_data, dist, disc, hippo, corde_t, capital):
@@ -102,11 +113,11 @@ def perform_full_analysis(parts_data, perfs_data, dist, disc, hippo, corde_t, ca
         perfs = perf_map.get(num, [])
         gc = (p.get("gainsParticipant") or {}).get("gainsCarriere", 0) or 0
         
-        # SÉPARATION DES STATS PRO (Analyse Point 1)
+        # SÉPARATION DES STATS PRO
         s_driver = get_pro_performance(p.get("statistiquesDriver"))
         s_entr = get_pro_performance(p.get("statistiquesEntraineur"))
         
-        # SCORES DYNAMIQUES (Analyse Point 4)
+        # SCORES DYNAMIQUES
         s_repos = get_repos_score_real(perfs)
         s_trend = get_trend_score(perfs)
         
@@ -119,7 +130,7 @@ def perform_full_analysis(parts_data, perfs_data, dist, disc, hippo, corde_t, ca
             "entraineur": round(s_entr, 1),
             "distance": 50.0,
             "cheval_stats": 50.0,
-            "elo": round(50 + (p.get("nombreVictoires", 0)*5), 1),
+            "elo": round(40 + (p.get("nombreVictoires", 0)*8), 1),
             "age_sexe": 70.0 if 3 <= (p.get("age",0)) <= 6 else 45.0,
             "repos": round(s_repos, 1),
             "elo_trend": round(s_trend, 1),
@@ -164,7 +175,7 @@ def perform_full_analysis(parts_data, perfs_data, dist, disc, hippo, corde_t, ca
     return ans
 
 # ============================================================
-#  ROUTES FLASK (SÉCURISÉES)
+#  4. ROUTES FLASK
 # ============================================================
 
 @app.route("/")
@@ -203,10 +214,6 @@ def api_course(rn, cn):
         prog = requests.get(f"{PMU_BASE}/{d}", headers=HEADERS, timeout=10).json()
         parts = requests.get(f"{PMU_BASE}/{d}/R{rn}/C{cn}/participants", headers=HEADERS, timeout=10).json()
         perfs = requests.get(f"{PMU_BASE}/{d}/R{rn}/C{cn}/performances-detaillees/pretty", headers=HEADERS, timeout=10).json()
-        
-        # LOGS DE VÉRIFICATION
-        print(f"--- DEBUG R{rn}C{cn} ---")
-        if parts.get("participants"): print(f"Champs dispos participants: {parts['participants'][0].keys()}")
         
         hippo, dist, disc, corde, h = "Inconnu", 2000, "ATTELE", "GAUCHE", "00:00"
         for re in prog.get("programme", {}).get("reunions", []):
