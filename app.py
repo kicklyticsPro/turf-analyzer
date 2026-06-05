@@ -18,19 +18,18 @@ from lib.calibration import Calibrator
 from lib import db, telegram_bot
 
 app = Flask(__name__)
-app.secret_key = "turf-secret-pro-v7.2-final-complete-ultra"
+app.secret_key = "turf-secret-pro-v7.2-final-complete-edge-fix-v2"
 ADMIN_PASSWORD = "admin123"
 
 HISTORY_DAYS = 30 
 ML_BLEND_WEIGHT = 0.55
 PMU_BASE = "https://offline.turfinfo.api.pmu.fr/rest/client/61/programme"
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; TurfAnalyzer/7.0)"}
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# Pre-chargement du bundle de stats pour éviter de tout recalculer à chaque requête
 GLOBAL_STATS_BUNDLE = None
 
 # ------------------------------------------------------------
-#  FONCTIONS DE CALCUL & SCORING
+#  FONCTIONS DE BASE & UTILITAIRES
 # ------------------------------------------------------------
 def fmt_date(d): return d.strftime("%d%m%Y")
 
@@ -63,104 +62,14 @@ def get_elo_score(ch, elo, all_h):
 
 def safe_compute_stats():
     global GLOBAL_STATS_BUNDLE
-    if GLOBAL_STATS_BUNDLE:
-        return GLOBAL_STATS_BUNDLE
+    if GLOBAL_STATS_BUNDLE: return GLOBAL_STATS_BUNDLE
     try:
         GLOBAL_STATS_BUNDLE = compute_all_stats(HISTORY_DAYS)
         return GLOBAL_STATS_BUNDLE
-    except:
-        return ({}, {}, {}, {}, {}, {})
+    except: return ({}, {}, {}, {}, {}, {})
 
 # ------------------------------------------------------------
-#  ANALYSE COURSE (Zéro Undefined Garanti)
-# ------------------------------------------------------------
-def analyser_course_features(parts_data, perfs_data, b, dist, disc, hippo, corde_t):
-    # Sécurisation des données d'entrée
-    raw_participants = (parts_data or {}).get("participants", [])
-    parts = [p for p in raw_participants if p.get("statut") == "PARTANT"]
-    if not parts: return []
-    
-    perf_map = {p.get("numPmu"): p.get("coursesCourues", []) for p in (perfs_data or {}).get("participants", [])}
-    all_h = [p.get("nom") for p in parts if p.get("nom")]
-    all_g = [(p.get("gainsParticipant") or {}).get("gainsCarriere", 0) or 0 for p in parts]
-    
-    ans = []
-    for i, p in enumerate(parts):
-        # Sécurisation de chaque variable pour éviter le 'undefined'
-        num = p.get("numPmu", 0)
-        ch = p.get("nom", "Inconnu")
-        dr = p.get("driver", "—")
-        en = p.get("entraineur", "—")
-        gc = (p.get("gainsParticipant") or {}).get("gainsCarriere", 0) or 0
-        perfs = perf_map.get(num, [])
-        musique = p.get("musique", "") or "—"
-        
-        # Calculs sécurisés
-        s_forme = score_forme_enrichi(perfs)
-        s_gains = min(100.0, 15 * math.log10(max(gc/1000, 1) + 1))
-        s_elo = get_elo_score(ch, b[2] if len(b) > 2 else {}, all_h)
-        s_musique = get_musique_score(musique)
-        s_gains_rel = get_relative_gains_score(gc, all_g)
-        s_form_ec = get_form_ecurie_score(en, (b[0] if b else {}).get("entraineurs", {}))
-        
-        # Valeurs par défaut pour les scores restants
-        s_ped = get_pedigree_score(p.get("nomPere"), p.get("nomMere"), (b[5] if len(b)>5 else {}).get("peres",{}), (b[5] if len(b)>5 else {}).get("meres",{})) if b else 50.0
-        s_corde = get_corde_score(num, len(parts), corde_t, disc)
-        s_equip = get_equipment_score(p.get("oeilleres"), p.get("deferre"))
-        prof = detect_profile(perfs)
-        s_prof_match = get_profile_match_score(prof, dist, len(parts))
-
-        ans.append({
-            "numPmu": num,
-            "nom": ch,
-            "age": p.get("age", 0) or "—",
-            "sexe": p.get("sexe", "") or "—",
-            "driver": dr,
-            "entraineur": en,
-            "musique": musique,
-            "nbCourses": p.get("nombreCourses", 0) or 0,
-            "nbVictoires": p.get("nombreVictoires", 0) or 0,
-            "nbPlaces": p.get("nombrePlaces", 0) or 0,
-            "cote": float(p.get("dernierRapportDirect",{}).get("rapport") or p.get("dernierRapportReference",{}).get("rapport") or 10.0),
-            "probaMarche": 10.0,
-            "gainsCarriere": gc // 100,
-            "ordreArrivee": p.get("ordreArrivee") or None,
-            "profile": prof,
-            "scores": {
-                "marche": 10.0, "forme": round(float(s_forme), 1), "carriere": 50.0, "gains": round(float(s_gains), 1),
-                "driver": 50.0, "entraineur": 50.0, "distance": 50.0, "cheval_stats": 50.0, "elo": round(float(s_elo), 1),
-                "age_sexe": 50.0, "repos": 50.0, "elo_trend": 50.0, "confrontation": 50.0,
-                "pedigree": round(float(s_ped), 1), "corde": round(float(s_corde), 1), "equipment": round(float(s_equip), 1),
-                "profile_match": round(float(s_prof_match), 1), "musique": round(float(s_musique), 1),
-                "gains_relatifs": round(float(s_gains_rel), 1), "form_ecurie": round(float(s_form_ec), 1)
-            },
-            "bonus": {"team": 0, "deferre": 0}
-        })
-    return ans
-
-def analyser_course(parts_data, perfs_data, b, dist, disc, hippo, corde_t, capital=100):
-    ans = analyser_course_features(parts_data, perfs_data, b, dist, disc, hippo, corde_t)
-    if not ans: return []
-    for a in ans:
-        a["chance"] = a["chanceHeur"] = round(sum([a["scores"][k]*w for k,w in {"forme":0.2,"gains":0.1,"elo":0.2,"musique":0.15,"form_ecurie":0.15,"pedigree":0.1,"corde":0.1}.items()]), 2)
-    
-    t_h = sum(a["chanceHeur"] for a in ans) or 1
-    for a in ans: a["chance"] = a["chanceHeur"] = round(a["chanceHeur"]/t_h*100, 2)
-    ans.sort(key=lambda x: -x["chance"])
-    for r, a in enumerate(ans, 1): a["rang"] = r
-    
-    pl3 = proba_place_simple([a["chance"] for a in ans], 3, len(ans))
-    for i, a in enumerate(ans):
-        a["chancePlace3"] = round(pl3[i], 2)
-        is_val = a["chance"] > 15 and a["cote"] >= 4
-        a["valueBet"] = is_val
-        a["isGold"] = is_val and a["scores"]["form_ecurie"] > 60
-        a["isCoupSur"] = a["chancePlace3"] >= 65 and a["rang"] == 1
-        a["kellyMise"] = kelly_amount(a["chance"]/100, a["cote"], capital, 0.25)
-    return ans
-
-# ------------------------------------------------------------
-#  API & STATS CORE
+#  API PMU WRAPPERS
 # ------------------------------------------------------------
 def get_programme(d):
     try: return requests.get(f"{PMU_BASE}/{d}", headers=HEADERS, timeout=10).json()
@@ -174,6 +83,9 @@ def get_performances(d, r, c):
     try: return requests.get(f"{PMU_BASE}/{d}/R{r}/C{c}/performances-detaillees/pretty", headers=HEADERS, timeout=10).json()
     except: return {"participants": []}
 
+# ------------------------------------------------------------
+#  COEUR DU MOTEUR
+# ------------------------------------------------------------
 def compute_all_stats(max_days):
     t_s, h_s = {"drivers": defaultdict(lambda: {"c":0,"v":0,"p":0}), "entraineurs": defaultdict(lambda: {"c":0,"v":0,"p":0})}, {"global": defaultdict(lambda: {"c":0,"v":0,"p":0})}
     elo, ped_d = defaultdict(lambda: 1500.0), []
@@ -198,8 +110,68 @@ def compute_all_stats(max_days):
     p_s, m_s = build_pedigree_stats(ped_d)
     return (dict(t_s), dict(h_s), dict(elo), {}, {}, {"peres": p_s, "meres": m_s})
 
+def analyser_course_features(parts_data, perfs_data, b, dist, disc, hippo, corde_t):
+    raw_p = (parts_data or {}).get("participants", [])
+    parts = [p for p in raw_p if p.get("statut") == "PARTANT"]
+    if not parts: return []
+    perf_map = {p.get("numPmu"): p.get("coursesCourues", []) for p in (perfs_data or {}).get("participants", [])}
+    all_h = [p.get("nom") for p in parts if p.get("nom")]
+    
+    # Calcul de la probabilité marché réelle (somme des inverses des cotes)
+    inv_cotes = []
+    for p in parts:
+        rap = float(p.get("dernierRapportDirect",{}).get("rapport") or p.get("dernierRapportReference",{}).get("rapport") or 50.0)
+        inv_cotes.append(1.0 / max(1.1, rap))
+    
+    total_inv = sum(inv_cotes) or 1.0
+    proba_m_list = [x/total_inv*100 for x in inv_cotes]
+    all_g = [(p.get("gainsParticipant") or {}).get("gainsCarriere", 0) or 0 for p in parts]
+    
+    ans = []
+    for i, p in enumerate(parts):
+        num, ch, dr, en = p.get("numPmu", 0), p.get("nom", "Inconnu"), p.get("driver", "—"), p.get("entraineur", "—")
+        gc = (p.get("gainsParticipant") or {}).get("gainsCarriere", 0) or 0
+        ans.append({
+            "numPmu": num, "nom": ch, "age": p.get("age", 0), "sexe": p.get("sexe", "") or "—", "driver": dr, "entraineur": en,
+            "musique": p.get("musique", "") or "—", "nbCourses": p.get("nombreCourses", 0) or 0, "nbVictoires": p.get("nombreVictoires", 0) or 0, "nbPlaces": p.get("nombrePlaces", 0) or 0,
+            "cote": round(1.0/max(0.0001, inv_cotes[i]), 1), "probaMarche": round(proba_m_list[i], 2), "gainsCarriere": gc//100,
+            "ordreArrivee": p.get("ordreArrivee"), "profile": detect_profile(perf_map.get(num, [])),
+            "scores": {
+                "marche": round(proba_m_list[i], 1), "forme": round(score_forme_enrichi(perf_map.get(num, [])), 1), "carriere": 50.0, "gains": round(15*math.log10(max(gc/1000,1)+1),1),
+                "driver": 50.0, "entraineur": 50.0, "distance": 50.0, "cheval_stats": 50.0, "elo": get_elo_score(ch, b[2] if len(b)>2 else {}, all_h),
+                "age_sexe": 50.0, "repos": 50.0, "elo_trend": 50.0, "confrontation": 50.0, "pedigree": get_pedigree_score(p.get("nomPere"), p.get("nomMere"), (b[5] if len(b)>5 else {}).get("peres",{}), (b[5] if len(b)>5 else {}).get("meres",{})),
+                "corde": get_corde_score(num, len(parts), corde_t, disc), "equipment": get_equipment_score(p.get("oeilleres"), p.get("deferre")),
+                "profile_match": 50.0, "musique": get_musique_score(p.get("musique")), "gains_relatifs": get_relative_gains_score(gc, all_g), "form_ecurie": get_form_ecurie_score(en, (b[0] if b else {}).get("entraineurs", {}))
+            },
+            "bonus": {"team": 0, "deferre": 0}
+        })
+    return ans
+
+def analyser_course(parts_data, perfs_data, b, dist, disc, hippo, corde_t, capital=100):
+    ans = analyser_course_features(parts_data, perfs_data, b, dist, disc, hippo, corde_t)
+    if not ans: return []
+    for a in ans:
+        # Poids heuristique global
+        a["chance"] = a["chanceHeur"] = round(sum([a["scores"][k]*w for k,w in {"forme":0.25,"gains":0.1,"elo":0.25,"musique":0.2,"form_ecurie":0.2}.items()]), 2)
+    
+    t_h = sum(a["chanceHeur"] for a in ans) or 1
+    for a in ans: a["chance"] = a["chanceHeur"] = round(a["chanceHeur"]/t_h*100, 2)
+    ans.sort(key=lambda x: -x["chance"])
+    for r, a in enumerate(ans, 1): a["rang"] = r
+    
+    pl3 = proba_place_simple([a["chance"] for a in ans], 3, len(ans))
+    for i, a in enumerate(ans):
+        a["chancePlace3"] = round(pl3[i], 2)
+        a["edge"] = round(a["chance"] - a["probaMarche"], 2)
+        is_val = a["edge"] > 4 and a["cote"] >= 4
+        a["valueBet"] = is_val
+        a["isGold"] = is_val and a["scores"]["form_ecurie"] > 60
+        a["isCoupSur"] = a["chancePlace3"] >= 65 and a["rang"] == 1
+        a["kellyMise"] = kelly_amount(a["chance"]/100, a["cote"], capital, 0.25)
+    return ans
+
 # ------------------------------------------------------------
-#  ROUTES FLASK
+#  ROUTES
 # ------------------------------------------------------------
 @app.route("/")
 def home(): return render_template("index.html")
@@ -224,7 +196,10 @@ def api_reunions():
         if not prog: return jsonify({"reunions": []})
         out = []
         for r in prog["programme"]["reunions"]:
-            courses = [{"numCourse": c["numOrdre"], "libelle": c.get("libelle") or c.get("libelleCourt"), "heure": datetime.fromtimestamp(c["heureDepart"]/1000).strftime("%H:%M") if c.get("heureDepart") else "00:00", "nbPartants": c.get("nombreDeclaresPartants"), "arriveeDefinitive": c.get("arriveeDefinitive", False)} for c in r["courses"]]
+            courses = []
+            for c in r["courses"]:
+                h = datetime.fromtimestamp(c["heureDepart"]/1000).strftime("%H:%M") if c.get("heureDepart") else "00:00"
+                courses.append({"numCourse": c["numOrdre"], "libelle": c.get("libelle") or c.get("libelleCourt"), "heure": h, "nbPartants": c.get("nombreDeclaresPartants"), "arriveeDefinitive": c.get("arriveeDefinitive", False)})
             out.append({"numReunion": r["numOfficiel"], "hippodrome": r["hippodrome"]["libelleCourt"], "courses": courses})
         return jsonify({"date": d, "reunions": out})
     except Exception as e: return jsonify({"error": str(e)}), 500
